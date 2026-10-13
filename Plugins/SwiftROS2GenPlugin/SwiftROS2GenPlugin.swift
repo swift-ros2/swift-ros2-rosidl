@@ -58,12 +58,6 @@ struct SwiftROS2GenPlugin: BuildToolPlugin {
                 arguments: [
                     "--input", inputSpec,
                     "--output", outputDir.string,
-                    // Generated files compile inside the consuming target, not
-                    // inside SwiftROS2Messages, so they need an explicit
-                    // `import SwiftROS2Messages` to resolve `ROS2Message` /
-                    // `ROS2MessageTypeInfo`. The CLI's `--extra-import` flag
-                    // appends one `import` line per repetition.
-                    "--extra-import", "SwiftROS2Messages",
                 ],
                 inputFiles: msgInputs,
                 outputFiles: outputs

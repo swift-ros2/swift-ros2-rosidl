@@ -2,6 +2,7 @@
 // Source: common_interfaces-jazzy/std_msgs/msg/Empty.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// std_msgs/msg/Empty
 public struct EmptyMsg: ROS2Message, Equatable, Sendable {

@@ -2,6 +2,7 @@
 // Source: common_interfaces-jazzy/std_msgs/msg/Bool.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// std_msgs/msg/Bool
 public struct BoolMsg: ROS2Message, Equatable, Sendable {

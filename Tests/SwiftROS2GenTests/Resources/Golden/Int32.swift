@@ -2,6 +2,7 @@
 // Source: common_interfaces-jazzy/std_msgs/msg/Int32.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// std_msgs/msg/Int32
 public struct Int32Msg: ROS2Message, Equatable, Sendable {

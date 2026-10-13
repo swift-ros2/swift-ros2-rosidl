@@ -2,6 +2,7 @@
 // Source: common_interfaces-jazzy/geometry_msgs/msg/Pose.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// geometry_msgs/msg/Pose
 public struct Pose: ROS2Message, Equatable, Sendable {

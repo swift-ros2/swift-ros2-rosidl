@@ -2,6 +2,7 @@
 // Source: unique_identifier_msgs/msg/UUID.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// unique_identifier_msgs/msg/UUID
 public struct UniqueIdentifierUUID: CDRCodable, Equatable, Sendable {

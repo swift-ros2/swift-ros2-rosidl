@@ -5,10 +5,9 @@ import Testing
 
 /// Phase 7 plumbing: ``Pipeline.generate(_:)`` and
 /// ``Pipeline.generateMulti(_:)`` accept an `extraImports` array that the
-/// emitter splices verbatim into every generated Swift file's import block.
-/// The CLI uses this to inject `import SwiftROS2Messages` so generated code
-/// compiled inside a downstream target resolves `ROS2Message` /
-/// `ROS2MessageTypeInfo`.
+/// emitter merges into every generated Swift file's import block, together
+/// with the derived imports (`SwiftROS2Messages` and the module of every
+/// referenced package).
 @Suite("Pipeline extraImports plumbing")
 struct PipelineExtraImportsTests {
     @Test("extraImports is reflected in every emitted file (single-package path)")
@@ -45,8 +44,8 @@ struct PipelineExtraImportsTests {
         }
     }
 
-    @Test("default empty extraImports does not inject any extra imports")
-    func defaultExtraImportsIsEmpty() throws {
+    @Test("default empty extraImports imports only SwiftROS2CDR and SwiftROS2Messages")
+    func defaultImportsAreCDRAndProtocols() throws {
         let fixtureURL = try #require(
             Bundle.module.url(
                 forResource: "std_msgs_primitives", withExtension: nil,
@@ -54,7 +53,8 @@ struct PipelineExtraImportsTests {
         let files = try Pipeline.generate(
             for: PackageInput(name: "std_msgs", directory: fixtureURL))
         for file in files {
-            #expect(!file.contents.contains("import SwiftROS2Messages"))
+            let imports = file.contents.split(separator: "\n").filter { $0.hasPrefix("import ") }
+            #expect(imports == ["import SwiftROS2CDR", "import SwiftROS2Messages"], "\(file.relativePath)")
         }
     }
 

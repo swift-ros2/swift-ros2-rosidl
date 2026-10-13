@@ -36,9 +36,19 @@ struct SwiftROS2GenCommand: ParsableCommand {
     @Option(
         name: .long,
         help:
-            "Repeatable. Additional `import <Module>` statement(s) to inject into every emitted Swift file. Used by SwiftROS2GenPlugin so generated files compiled outside the SwiftROS2Messages module can resolve `ROS2Message` / `ROS2MessageTypeInfo`."
+            "Repeatable. Additional `import <Module>` statement(s) to inject into every emitted Swift file, merged with the derived ones (SwiftROS2Messages and the module of every referenced package)."
     )
     var extraImport: [String] = []
+
+    @Option(
+        name: .long,
+        help: """
+            <package_name>=<Module>. Repeatable. Swift module that holds a ROS package's types; defaults to the \
+            package name in PascalCase (geometry_msgs → GeometryMsgs). Generated files import the module of every \
+            package they reference except their own.
+            """
+    )
+    var module: [String] = []
 
     @Option(
         name: .long,
@@ -88,6 +98,22 @@ struct SwiftROS2GenCommand: ParsableCommand {
                 "invalid --extra-import '\(value)' — expected a Swift module identifier (e.g. 'SwiftROS2Messages' or 'My.Nested.Module')"
             )
         }
+        for raw in module {
+            let parts = raw.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2, !parts[0].isEmpty, ModuleIdentifier.isValid(parts[1]) else {
+                throw ValidationError("invalid --module '\(raw)' — expected <package_name>=<Module>")
+            }
+        }
+    }
+
+    /// The `--module` overrides as a ROS package → Swift module map.
+    var moduleNames: ModuleNames {
+        var names: ModuleNames = [:]
+        for raw in module {
+            let parts = raw.split(separator: "=", maxSplits: 1).map(String.init)
+            names[parts[0]] = parts[1]
+        }
+        return names
     }
 
     func run() throws {
@@ -124,7 +150,7 @@ struct SwiftROS2GenCommand: ParsableCommand {
         }
         let files: [GeneratedFile]
         do {
-            files = try Pipeline.generateMulti(runs, extraImports: extraImport)
+            files = try Pipeline.generateMulti(runs, extraImports: extraImport, moduleNames: moduleNames)
         } catch let err as GeneratorError {
             FileHandle.standardError.write(Data("error: \(err)\n".utf8))
             throw ExitCode.failure
