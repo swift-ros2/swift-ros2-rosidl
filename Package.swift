@@ -21,6 +21,10 @@ let package = Package(
     products: [
         .library(name: "SwiftROS2CDR", targets: ["SwiftROS2CDR"]),
         .library(name: "SwiftROS2Messages", targets: ["SwiftROS2Messages"]),
+        .library(name: "BuiltinInterfaces", targets: ["BuiltinInterfaces"]),
+        .library(name: "UniqueIdentifierMsgs", targets: ["UniqueIdentifierMsgs"]),
+        .library(name: "ActionMsgs", targets: ["ActionMsgs"]),
+        .library(name: "RclInterfaces", targets: ["RclInterfaces"]),
         .library(name: "SwiftROS2Gen", targets: ["SwiftROS2Gen"]),
         .executable(name: "swift-ros2-gen", targets: ["swift-ros2-gen"]),
         .plugin(name: "SwiftROS2GenPlugin", targets: ["SwiftROS2GenPlugin"]),
@@ -31,6 +35,18 @@ let package = Package(
         .target(
             name: "SwiftROS2Messages", dependencies: ["SwiftROS2CDR"],
             path: "Sources/SwiftROS2Messages"),
+        .target(name: "BuiltinInterfaces", dependencies: ["SwiftROS2CDR", "SwiftROS2Messages"]),
+        .target(name: "UniqueIdentifierMsgs", dependencies: ["SwiftROS2CDR", "SwiftROS2Messages"]),
+        .target(
+            name: "ActionMsgs",
+            dependencies: ["SwiftROS2CDR", "SwiftROS2Messages", "BuiltinInterfaces", "UniqueIdentifierMsgs"]),
+        .target(name: "RclInterfaces", dependencies: ["SwiftROS2CDR", "SwiftROS2Messages", "BuiltinInterfaces"]),
+        .executableTarget(
+            name: "RosidlOracleCorpus",
+            dependencies: [
+                "SwiftROS2CDR", "SwiftROS2Messages", "BuiltinInterfaces", "UniqueIdentifierMsgs", "ActionMsgs",
+                "RclInterfaces",
+            ]),
         .target(name: "SwiftROS2Gen", path: "Sources/SwiftROS2Gen"),
         .executableTarget(
             name: "swift-ros2-gen",
@@ -48,7 +64,11 @@ let package = Package(
             path: "Sources/Examples/PluginSmoke", exclude: ["msg"],
             plugins: [.plugin(name: "SwiftROS2GenPlugin")]),
         .testTarget(
-            name: "SwiftROS2CDRTests", dependencies: ["SwiftROS2CDR", "SwiftROS2Messages"],
+            name: "SwiftROS2CDRTests",
+            dependencies: [
+                "SwiftROS2CDR", "SwiftROS2Messages", "BuiltinInterfaces", "UniqueIdentifierMsgs", "ActionMsgs",
+                "RclInterfaces",
+            ],
             path: "Tests/SwiftROS2CDRTests"),
         .testTarget(
             name: "SwiftROS2MessagesTests", dependencies: ["SwiftROS2Messages"],

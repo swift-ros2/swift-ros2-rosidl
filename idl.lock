@@ -1,0 +1,11 @@
+# Upstream IDL for Scripts/regenerate.sh and the oracles: <name> <url> <distribution> <commit>.
+# To move a line: git ls-remote <url> refs/heads/<distribution>, then run Scripts/regenerate.sh
+# and commit this file together with the regenerated sources.
+rcl_interfaces https://github.com/ros2/rcl_interfaces.git humble 82776fc9068d1e0cd4af11c2e2700195994b2eb1
+rcl_interfaces https://github.com/ros2/rcl_interfaces.git jazzy 7aa3caf43377ea6ad615bc1040832e2c7566bfbe
+rcl_interfaces https://github.com/ros2/rcl_interfaces.git kilted 45871bf69f1e5f281cd8684393b03412fe340aeb
+rcl_interfaces https://github.com/ros2/rcl_interfaces.git lyrical b90e36e4adf5ed878efa2f365a84798f782618cd
+unique_identifier_msgs https://github.com/ros2/unique_identifier_msgs.git humble 27767cefcf8a80da44641dc208c57722c28aa11c
+unique_identifier_msgs https://github.com/ros2/unique_identifier_msgs.git jazzy 901599ee92c2ee949f42a5c5d821c92b3e515d69
+unique_identifier_msgs https://github.com/ros2/unique_identifier_msgs.git kilted 21bb7a23157e5408db4a46d72dbf29980e6bb206
+unique_identifier_msgs https://github.com/ros2/unique_identifier_msgs.git lyrical b4779af6b3d3c45e710802a0e7f86113da281ae8

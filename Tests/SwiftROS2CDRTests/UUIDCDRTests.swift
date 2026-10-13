@@ -1,5 +1,6 @@
 // Tests/SwiftROS2CDRTests/UUIDCDRTests.swift
 import Foundation
+import UniqueIdentifierMsgs
 import XCTest
 
 @testable import SwiftROS2CDR

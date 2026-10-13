@@ -1,4 +1,6 @@
+import BuiltinInterfaces
 import Foundation
+import RclInterfaces
 import XCTest
 
 @testable import SwiftROS2CDR
