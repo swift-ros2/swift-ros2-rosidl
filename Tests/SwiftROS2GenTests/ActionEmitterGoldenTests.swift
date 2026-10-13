@@ -54,7 +54,7 @@ struct ActionEmitterGoldenTests {
             Bundle.module.url(
                 forResource: "Fibonacci",
                 withExtension: "swift",
-                subdirectory: "Golden/Action"
+                subdirectory: "Resources/Golden/Action"
             )
         )
         let golden = try String(contentsOf: goldenURL, encoding: .utf8)
