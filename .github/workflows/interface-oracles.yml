@@ -1,0 +1,73 @@
+name: Interface oracles
+
+on:
+  workflow_call:
+    inputs:
+      corpus-product:
+        description: Executable that writes the oracle corpus (e.g. CommonInterfacesOracleCorpus)
+        required: true
+        type: string
+      rosidl-path:
+        description: Path to a swift-ros2-rosidl checkout holding Scripts/cdr-oracle.py
+        required: false
+        type: string
+        default: .build/checkouts/swift-ros2-rosidl
+      apt-packages:
+        description: >-
+          Extra Debian packages installed into osrf/ros:<distro>-desktop before the oracles run,
+          space-separated; ${distro} is replaced with the row's distribution
+          (e.g. "ros-${distro}-moveit-msgs ros-${distro}-control-msgs")
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  oracles:
+    name: Oracles (${{ matrix.ros_distro }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Jazzy and Lyrical run on every event and gate pull requests. Kilted and Rolling join
+        # only the caller's weekly schedule run and never fail it.
+        ros_distro: ${{ fromJSON(github.event_name == 'schedule' && '["jazzy", "lyrical", "kilted", "rolling"]' || '["jazzy", "lyrical"]') }}
+    continue-on-error: ${{ matrix.ros_distro == 'kilted' || matrix.ros_distro == 'rolling' }}
+    env:
+      IMAGE: swift-ros2-interface-oracle:${{ matrix.ros_distro }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift 6.3.1
+        run: |
+          curl -fsSL "https://download.swift.org/swift-6.3.1-release/ubuntu2404/swift-6.3.1-RELEASE/swift-6.3.1-RELEASE-ubuntu24.04.tar.gz" -o /tmp/swift.tar.gz
+          sudo mkdir -p /opt/swift
+          sudo tar -xzf /tmp/swift.tar.gz -C /opt/swift --strip-components=1
+          echo "/opt/swift/usr/bin" >> "$GITHUB_PATH"
+      - name: Fetch the upstream IDL pinned in idl.lock
+        run: bash Scripts/fetch-idl.sh
+      - name: Oracle image
+        env:
+          DISTRO: ${{ matrix.ros_distro }}
+          APT_PACKAGES: ${{ inputs.apt-packages }}
+        run: |
+          base="osrf/ros:${DISTRO}-desktop"
+          docker pull "$base"
+          pkgs=$(printf '%s' "$APT_PACKAGES" | sed "s/\${distro}/${DISTRO}/g")
+          if [ -n "$pkgs" ]; then
+            printf 'FROM %s\nRUN apt-get update && apt-get install -y --no-install-recommends %s && rm -rf /var/lib/apt/lists/*\n' \
+              "$base" "$pkgs" | docker build -t "$IMAGE" -
+          else
+            docker tag "$base" "$IMAGE"
+          fi
+      - name: Hash oracle
+        run: |
+          # One distribution, labelled with the row's name: the Rolling row verifies the
+          # Lyrical IDL as @rolling, so --distros rolling selects it.
+          ARGS=()
+          while IFS= read -r line; do ARGS+=("$line"); done < <(bash Scripts/generator-args.sh "${{ matrix.ros_distro }}")
+          swift run swift-ros2-gen "${ARGS[@]}" --verify-hashes "$IMAGE" --distros "${{ matrix.ros_distro }}" --diagnose
+      - name: CDR oracle
+        run: |
+          swift run "${{ inputs.corpus-product }}" "$PWD/oracle-corpus"
+          docker run --rm -v "$PWD/oracle-corpus:/corpus:ro" \
+            -v "$PWD/${{ inputs.rosidl-path }}/Scripts/cdr-oracle.py:/cdr-oracle.py:ro" \
+            "$IMAGE" bash -c "source /opt/ros/${{ matrix.ros_distro }}/setup.bash && python3 /cdr-oracle.py /corpus"
