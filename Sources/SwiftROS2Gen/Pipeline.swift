@@ -273,23 +273,19 @@ extension Pipeline {
         }
     }
 
-    /// Multi-package generation. All inputs are parsed first, then the resulting IRs
-    /// are aggregated into a registry. Hashing and emission run after the registry is
-    /// complete so cross-package references (e.g. `std_msgs/Header → builtin_interfaces/Time`)
-    /// resolve regardless of the order packages appear in `runs`.
-    ///
-    /// Phase 4: when two `runs` share the same `input.name` (typically because
-    /// the caller passed both a Humble and a Jazzy directory for the same
-    /// package), the per-distro IDL files for each type are merged via
-    /// ``IRBuilder/build(perDistro:)`` into a single distro-conditional IR.
-    /// `unresolvedIRs` then carries one merged IR per `(package, typeName)`
-    /// even though the source IDLs come from multiple distros.
-    public static func generateMulti(
-        _ runs: [PackageRun],
-        extraImports: [String] = [],
-        moduleNames: ModuleNames = [:]
-    ) throws -> [GeneratedFile] {
-        try ModuleIdentifier.validateAll(extraImports)
+    /// Everything `generateMulti` and `generateOracleSamples` need before emission.
+    struct Collected {
+        var unresolvedIRs: [(run: PackageRun, ir: MessageIR, sourceLabel: String)]
+        var collectedServices: [ParsedService]
+        var collectedActions: [ParsedAction]
+        var registry: [String: MessageIR]
+        var nameOverrides: SwiftNameOverrides
+        var dependencyPackages: Set<String>
+    }
+
+    /// Parses every run, merges multi-distro packages, builds the registry and the Swift
+    /// name overrides, and checks that every nested reference resolves.
+    static func collect(_ runs: [PackageRun]) throws -> Collected {
         var unresolvedIRs: [(run: PackageRun, ir: MessageIR, sourceLabel: String)] = []
         var collectedServices: [ParsedService] = []
         var collectedActions: [ParsedAction] = []
@@ -440,6 +436,30 @@ extension Pipeline {
                 "\(svc.typeName)Response"
         }
         try validateAllReferencesResolved(registry: registry)
+        return Collected(
+            unresolvedIRs: unresolvedIRs, collectedServices: collectedServices,
+            collectedActions: collectedActions, registry: registry, nameOverrides: nameOverrides,
+            dependencyPackages: dependencyPackages)
+    }
+
+    /// Multi-package generation. All inputs are parsed first, then the resulting IRs
+    /// are aggregated into a registry. Hashing and emission run after the registry is
+    /// complete so cross-package references (e.g. `std_msgs/Header → builtin_interfaces/Time`)
+    /// resolve regardless of the order packages appear in `runs`.
+    ///
+    /// Phase 4: when two `runs` share the same `input.name` (typically because
+    /// the caller passed both a Humble and a Jazzy directory for the same
+    /// package), the per-distro IDL files for each type are merged via
+    /// ``IRBuilder/build(perDistro:)`` into a single distro-conditional IR.
+    /// `unresolvedIRs` then carries one merged IR per `(package, typeName)`
+    /// even though the source IDLs come from multiple distros.
+    public static func generateMulti(
+        _ runs: [PackageRun],
+        extraImports: [String] = [],
+        moduleNames: ModuleNames = [:]
+    ) throws -> [GeneratedFile] {
+        try ModuleIdentifier.validateAll(extraImports)
+        let c = try collect(runs)
         // Precompute the modern (jazzy-view) hash for every IR. Single-distro
         // humble-only inputs do not need a Jazzy hash (humble has no RIHS01
         // anyway), but computing it is cheap and the per-distro projection
@@ -447,12 +467,12 @@ extension Pipeline {
         // type lookups in the registry get the same field projection as the
         // root.
         var hashByRosName: [String: String] = [:]
-        for entry in unresolvedIRs {
+        for entry in c.unresolvedIRs {
             hashByRosName[entry.ir.rosTypeName] = RIHS01.hash(
-                entry.ir, for: "jazzy", registry: registry)
+                entry.ir, for: "jazzy", registry: c.registry)
         }
         var results: [GeneratedFile] = []
-        for entry in unresolvedIRs {
+        for entry in c.unresolvedIRs {
             guard let primaryHash = hashByRosName[entry.ir.rosTypeName] else {
                 preconditionFailure(
                     "Pipeline: missing precomputed hash for \(entry.ir.rosTypeName)"
@@ -507,21 +527,21 @@ extension Pipeline {
             )
             let key = "\(entry.ir.package)/\(entry.ir.kind.rawValue)/\(entry.ir.typeName)"
             // Dependency-only packages are hashed above but emitted elsewhere.
-            if dependencyPackages.contains(entry.ir.package) { continue }
+            if c.dependencyPackages.contains(entry.ir.package) { continue }
             // Action IRs (the three user blocks + five wrappers) are emitted
             // together in a single per-action Swift file below, not as
             // standalone files.
             if entry.ir.kind == .action {
                 continue
             }
-            let nameOverride = nameOverrides[key]
+            let nameOverride = c.nameOverrides[key]
             let isNested = Pipeline.defaultNestedOnlyTypes.contains(key)
             let swift = SwiftEmitter.emit(
                 hashed,
                 sourceLabel: entry.sourceLabel,
                 isNested: isNested,
                 structNameOverride: nameOverride,
-                nestedNameOverrides: nameOverrides,
+                nestedNameOverrides: c.nameOverrides,
                 extraImports: extraImports,
                 moduleNames: moduleNames
             )
@@ -539,13 +559,13 @@ extension Pipeline {
         // `<Service>Srv.Request` / `.Response` and read the canonical service-level
         // hashes from `typeInfo`. The umbrella reuses the per-half hashes that
         // already landed in the registry above.
-        for svc in collectedServices where !dependencyPackages.contains(svc.package) {
+        for svc in c.collectedServices where !c.dependencyPackages.contains(svc.package) {
             let reqKey = "\(svc.package)/srv/\(svc.typeName)_Request"
             let resKey = "\(svc.package)/srv/\(svc.typeName)_Response"
             let requestHash = hashByRosName[reqKey]
             let responseHash = hashByRosName[resKey]
-            let requestStructName = nameOverrides[reqKey] ?? "\(svc.typeName)Request"
-            let responseStructName = nameOverrides[resKey] ?? "\(svc.typeName)Response"
+            let requestStructName = c.nameOverrides[reqKey] ?? "\(svc.typeName)Request"
+            let responseStructName = c.nameOverrides[resKey] ?? "\(svc.typeName)Response"
             let umbrellaName =
                 Pipeline.defaultSwiftNameOverrides["\(svc.package)/srv/\(svc.typeName)"]
                 ?? "\(svc.typeName)Srv"
@@ -574,15 +594,15 @@ extension Pipeline {
         // The action-level + wrapper hashes come from
         // ``IRBuilder/populateActionHashes(_:distro:extraRegistry:)`` which
         // reuses the global registry assembled above.
-        for act in collectedActions where !dependencyPackages.contains(act.package) {
+        for act in c.collectedActions where !c.dependencyPackages.contains(act.package) {
             var actionIR = act.actionIR
             IRBuilder.populateActionHashes(
-                &actionIR, distro: "jazzy", extraRegistry: registry)
+                &actionIR, distro: "jazzy", extraRegistry: c.registry)
             let label = "\(act.package)/action/\(act.typeName).action"
             let swift = SwiftEmitter.emit(
                 actionIR,
                 sourceLabel: label,
-                nestedNameOverrides: nameOverrides,
+                nestedNameOverrides: c.nameOverrides,
                 extraImports: extraImports,
                 moduleNames: moduleNames
             )
@@ -594,6 +614,133 @@ extension Pipeline {
                 ))
         }
         return results
+    }
+
+    /// Oracle sample files for every emitted message, service half and action
+    /// Goal / Result / Feedback: one `OracleSamples+<Pkg>.swift` per package and one
+    /// `OracleSamples.swift` registry. Compiled into a repository's oracle corpus executable,
+    /// never into a library product.
+    ///
+    /// A type of a dependency-only package gets an extension, in
+    /// `OracleSamples+Dependencies.swift`, only when an emitted type reaches it through its
+    /// fields (directly or through other dependency types), and never a sample of its own.
+    public static func generateOracleSamples(
+        _ runs: [PackageRun], moduleNames: ModuleNames = [:]
+    ) throws -> [GeneratedFile] {
+        let c = try collect(runs)
+        var extensionsByFile: [String: [String]] = [:]
+        var packagesByFile: [String: Set<String>] = [:]
+        var samples: [(rosName: String, swiftName: String)] = []
+        // Dependency message types by ROS name, and the ones an added type references.
+        var dependencyIRs: [String: MessageIR] = [:]
+        for entry in c.unresolvedIRs where c.dependencyPackages.contains(entry.ir.package) {
+            dependencyIRs[entry.ir.rosTypeName] = entry.ir
+        }
+        var reachedDependencyTypes: [String] = []
+
+        func add(_ ir: MessageIR, swiftName: String, file: String, overrides: [String: String]) {
+            extensionsByFile[file, default: []].append(
+                OracleSampleEmitter.emitExtension(ir, structName: swiftName, nestedNameOverrides: overrides))
+            packagesByFile[file, default: []].insert(ir.package)
+            for field in ir.fields {
+                packagesByFile[file, default: []].formUnion(field.type.referencedPackages)
+                for name in field.type.referencedTypeNames where dependencyIRs[name] != nil {
+                    reachedDependencyTypes.append(name)
+                }
+            }
+        }
+
+        // Messages and service halves of emitted packages. Action parts (kind == .action) are
+        // handled below; dependency types only once an emitted type reaches them.
+        for entry in c.unresolvedIRs
+        where entry.ir.kind != .action && !c.dependencyPackages.contains(entry.ir.package) {
+            let key = "\(entry.ir.package)/\(entry.ir.kind.rawValue)/\(entry.ir.typeName)"
+            let swiftName = c.nameOverrides[key] ?? SwiftEmitter.swiftStructName(typeName: entry.ir.typeName)
+            add(
+                entry.ir, swiftName: swiftName, file: "OracleSamples+\(pascal(entry.ir.package)).swift",
+                overrides: c.nameOverrides)
+            samples.append((entry.ir.rosTypeName, swiftName))
+        }
+        // Action Goal / Result / Feedback, named as SwiftEmitter.emit(_ ir: ActionIR…) names them.
+        for act in c.collectedActions where !c.dependencyPackages.contains(act.package) {
+            let enumName = "\(act.typeName)Action"
+            var overrides = c.nameOverrides
+            for part in ["Goal", "Result", "Feedback"] {
+                overrides["\(act.package)/action/\(act.typeName)_\(part)"] = "\(enumName).\(part)"
+            }
+            let file = "OracleSamples+\(pascal(act.package)).swift"
+            for (part, ir) in [
+                ("Goal", act.actionIR.goal), ("Result", act.actionIR.result), ("Feedback", act.actionIR.feedback),
+            ] {
+                add(ir, swiftName: "\(enumName).\(part)", file: file, overrides: overrides)
+                samples.append(("\(act.package)/action/\(act.typeName)_\(part)", "\(enumName).\(part)"))
+            }
+        }
+        // Dependency types the emitted types reach, transitively. They get an extension (nested
+        // fields call it) but no sample of their own: their package's repository tests them.
+        var addedDependencyTypes = Set<String>()
+        while let name = reachedDependencyTypes.popLast() {
+            guard addedDependencyTypes.insert(name).inserted, let ir = dependencyIRs[name] else { continue }
+            let swiftName = c.nameOverrides[name] ?? SwiftEmitter.swiftStructName(typeName: ir.typeName)
+            add(ir, swiftName: swiftName, file: "OracleSamples+Dependencies.swift", overrides: c.nameOverrides)
+        }
+
+        // The generated-file banner plus one lexicographically sorted import block (swift-format's
+        // `OrderedImports`), so a corpus target that lints its sources passes.
+        func header(packages: Set<String>) -> String {
+            let modules = Set(
+                ["Foundation", ModuleImports.cdrModule]
+                    + ModuleImports.imports(referencing: packages, moduleNames: moduleNames)
+            ).sorted()
+            return "// Generated by swift-ros2-gen \u{2014} DO NOT EDIT.\n\n"
+                + modules.map { "import \($0)\n" }.joined()
+        }
+        var files: [GeneratedFile] = []
+        for (file, extensions) in extensionsByFile.sorted(by: { $0.key < $1.key }) {
+            let out = header(packages: packagesByFile[file] ?? []) + "\n" + extensions.joined(separator: "\n")
+            files.append(GeneratedFile(relativePath: file, contents: out))
+        }
+        let allPackages = packagesByFile.values.reduce(into: Set<String>()) { $0.formUnion($1) }
+        var registry = header(packages: allPackages)
+        registry += """
+
+            /// One CDR oracle sample: the ROS name, the CDR bytes Swift produces for it, and a
+            /// decode-then-encode of given bytes as the same type (the Swift round-trip).
+            struct OracleSample {
+                let rosName: String
+                let encode: () throws -> Data
+                let reencode: (Data) throws -> Data
+            }
+
+            /// Every sample of this run, in ROS-name order.
+            enum OracleSamples {
+                static let all: [OracleSample] = [
+
+            """
+        for sample in samples.sorted(by: { $0.rosName < $1.rosName }) {
+            registry += "        OracleSample(\n"
+            registry += "            rosName: \"\(sample.rosName)\",\n"
+            registry += "            encode: { try oracleEncode(\(sample.swiftName).oracleSample()) },\n"
+            registry += "            reencode: { try oracleReencode(\(sample.swiftName).self, $0) }),\n"
+        }
+        registry += """
+                ]
+            }
+
+            func oracleEncode<T: CDREncodable>(_ value: T) throws -> Data {
+                let encoder = CDREncoder()
+                encoder.writeEncapsulationHeader()
+                try value.encode(to: encoder)
+                return encoder.getData()
+            }
+
+            func oracleReencode<T: CDRCodable>(_ type: T.Type, _ data: Data) throws -> Data {
+                try oracleEncode(T(from: CDRDecoder(data: data)))
+            }
+
+            """
+        files.append(GeneratedFile(relativePath: "OracleSamples.swift", contents: registry))
+        return files
     }
 
     /// Lightweight carrier for an as-parsed `.srv`: keeps the two halves' raw IDLFiles

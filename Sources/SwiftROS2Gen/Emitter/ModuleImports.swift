@@ -54,6 +54,12 @@ public enum ModuleImports {
             extraImports: extraImports)
         return ([cdrModule] + modules).sorted().map { "import \($0)\n" }.joined()
     }
+
+    /// Imports for a file outside every generated package (an oracle corpus) that uses types of
+    /// `packages`: ``protocolsModule`` plus the module of every package, sorted lexicographically.
+    public static func imports(referencing packages: Set<String>, moduleNames: ModuleNames) -> [String] {
+        Set([protocolsModule] + packages.map { moduleName(forPackage: $0, moduleNames: moduleNames) }).sorted()
+    }
 }
 
 extension FieldType {
@@ -62,6 +68,16 @@ extension FieldType {
         switch self {
         case .nested(let package, _): return [package]
         case .array(let element, _), .sequence(let element, _): return element.referencedPackages
+        case .primitive, .boundedString: return []
+        }
+    }
+
+    /// ROS names (`<pkg>/msg/<Type>`) of the message types this field references, looking
+    /// through arrays and sequences.
+    public var referencedTypeNames: Set<String> {
+        switch self {
+        case .nested(let package, let typeName): return ["\(package)/msg/\(typeName)"]
+        case .array(let element, _), .sequence(let element, _): return element.referencedTypeNames
         case .primitive, .boundedString: return []
         }
     }
