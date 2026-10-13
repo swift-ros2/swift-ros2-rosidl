@@ -6,7 +6,7 @@ import SwiftROS2CDR
 import SwiftROS2Messages
 
 /// sensor_msgs/msg/Range
-public struct Range: ROS2Message, Equatable, Sendable {
+public struct RangeMsg: ROS2Message, Equatable, Sendable {
     public static func typeInfo(for distro: ROS2Distro) -> ROS2MessageTypeInfo {
         ROS2MessageTypeInfo(
             typeName: "sensor_msgs/msg/Range",

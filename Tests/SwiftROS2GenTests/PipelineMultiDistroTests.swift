@@ -131,7 +131,7 @@ struct PipelineMultiDistroEndToEndTests {
             "JoyFeedback", "JoyFeedbackArray", "LaserEcho", "LaserScan",
             "MagneticField", "MultiDOFJointState", "MultiEchoLaserScan",
             "NavSatFix", "NavSatStatus", "PointCloud", "PointCloud2",
-            "PointField", "Range", "RegionOfInterest", "RelativeHumidity",
+            "PointField", "RangeMsg", "RegionOfInterest", "RelativeHumidity",
             "SetCameraInfoRequest", "SetCameraInfoResponse", "SetCameraInfoSrv",
             "Temperature", "TimeReference",
         ]

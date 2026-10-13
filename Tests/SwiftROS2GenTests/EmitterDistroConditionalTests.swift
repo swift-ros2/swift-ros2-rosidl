@@ -53,7 +53,7 @@ struct EmitterDistroConditionalTests {
             ir, sourceLabel: "common_interfaces-multi/sensor_msgs/msg/Range.msg")
         let goldenURL = try #require(
             Bundle.module.url(
-                forResource: "Range", withExtension: "swift", subdirectory: "Resources/Golden"))
+                forResource: "RangeMsg", withExtension: "swift", subdirectory: "Resources/Golden"))
         let golden = try String(contentsOf: goldenURL, encoding: .utf8)
         #expect(actual == golden, "Range emit mismatch:\n--- actual ---\n\(actual)")
     }
