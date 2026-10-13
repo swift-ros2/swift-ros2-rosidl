@@ -82,7 +82,13 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -switch /Applications/Xcode_26.4.1.app
       - name: Generate DocC
-        run: swift package generate-documentation --target SwiftROS2Messages
+        run: |
+          swift package generate-documentation \
+            --target SwiftROS2Messages \
+            --target BuiltinInterfaces \
+            --target UniqueIdentifierMsgs \
+            --target ActionMsgs \
+            --target RclInterfaces
       - name: Check DocC coverage
         run: bash Scripts/check-docc-coverage.sh
 
