@@ -120,11 +120,10 @@ struct PipelineMultiDistroEndToEndTests {
             .appendingPathComponent("Sources")
             .appendingPathComponent("SwiftROS2Messages")
             .appendingPathComponent("Generated")
-        // Cover every generated `sensor_msgs` artifact this phase committed
-        // — message types plus the synthesized `.srv` request / response /
-        // umbrella halves. Anything that lands under
-        // `Sources/SwiftROS2Messages/Generated/SensorMsgs/` should round-trip
-        // bit-for-bit through the generator on a fresh run.
+        // Cover the `sensor_msgs` message types and the synthesized `.srv` request /
+        // response / umbrella halves that this test compares with a committed copy under
+        // `generatedRoot`. That `Generated` tree was removed from this repository, and the
+        // `vendor/` IDL it reads is absent too, so the guard above returns early here.
         let typesUnderTest: Set<String> = [
             "BatteryState", "CameraInfo", "ChannelFloat32", "CompressedImage",
             "FluidPressure", "Illuminance", "Image", "Imu", "JointState", "Joy",

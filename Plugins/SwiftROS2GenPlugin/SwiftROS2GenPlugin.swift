@@ -5,9 +5,10 @@
 // Naming rule mirrored from SwiftROS2Gen.Pipeline / SwiftEmitter
 // (Phase 2+): the per-package directory is PascalCase(package); the
 // per-type filename is the bare PascalCase type name, with a trailing
-// `Msg` only when the type collides with a Swift stdlib name (Bool,
-// String, Int*, UInt*, Float*, Double, plus Empty kept by ROS
-// convention). If `Sources/SwiftROS2Gen/Emitter/SwiftEmitter.swift`
+// `Msg` only when the type collides with a Swift stdlib name or a
+// common Swift/Foundation type (Bool, String, Int, Int8..Int64, UInt,
+// UInt8..UInt64, Float, Float32, Float64, Double, Empty, Duration,
+// Range, Clock). If `Sources/SwiftROS2Gen/Emitter/SwiftEmitter.swift`
 // changes the collision set or drops the `Msg` rule, update
 // `swiftStructName(typeName:)` below in lockstep.
 //

@@ -3,7 +3,7 @@ import Foundation
 /// Identifies a ROS 2 package directory that the generator should process.
 public struct PackageInput: Sendable {
     public let name: String  // "std_msgs"
-    public let directory: URL  // vendor/common_interfaces-jazzy/std_msgs
+    public let directory: URL  // <idl-root>/std_msgs
     /// ROS 2 distro this directory represents (e.g. "humble", "jazzy"). The
     /// pipeline groups inputs that share `name` across distros and merges
     /// their per-distro IDLs into a single distro-conditional IR.
@@ -1239,8 +1239,8 @@ extension Pipeline {
                 if let allow = unifiedAllowList, !allow.contains(typeName) { continue }
                 let contents = try String(contentsOf: fileURL, encoding: .utf8)
                 // Derive the parent name from the actual filesystem directory
-                // so submodule renames (e.g. vendor/common_interfaces-jazzy ->
-                // vendor/common_interfaces) are reflected in the label.
+                // (the `<idl-root>` in `<idl-root>/std_msgs/msg/Header.msg`) so a
+                // renamed IDL root is reflected in the label.
                 let parentDir = run.input.directory.deletingLastPathComponent().lastPathComponent
                 let label = "\(parentDir)/\(packageName)/msg/\(typeName).msg"
                 do {
