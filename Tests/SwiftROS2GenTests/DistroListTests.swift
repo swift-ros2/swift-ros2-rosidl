@@ -44,13 +44,13 @@ struct DistroListTests {
                 .contains("decoder.isLegacySchema"))
     }
 
-    @Test("the modern typeInfo arm lists Lyrical and falls back to a Lyrical-only hash")
+    @Test("the modern typeInfo branch falls back to a Lyrical-only hash")
     func typeInfoFactoryModernArm() {
         let ir = MessageIR(
             package: "demo_msgs", typeName: "Foo", fields: [],
             perDistroHashes: ["lyrical": "RIHS01_lyrical"], perDistroFieldPresence: [:])
         let out = SwiftEmitter.emitTypeInfoFactory(ir)
-        #expect(out.contains("        case .jazzy, .kilted, .lyrical, .rolling:\n"))
-        #expect(out.contains("typeHash: \"RIHS01_lyrical\""))
+        #expect(!out.contains("switch distro"))
+        #expect(out.contains("typeHash: distro.isLegacySchema\n                ? nil : \"RIHS01_lyrical\""))
     }
 }
