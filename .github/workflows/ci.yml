@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-swift-format:
+    name: Lint (swift-format)
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.3-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint
+        run: swift format lint --recursive --strict --configuration .swift-format Package.swift Sources Tests Plugins
+
+  build-macos:
+    name: Build & Test (macOS)
+    needs: [lint-swift-format]
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.4.1.app
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test --parallel
+      - name: Smoke-test the SwiftPM build plugin
+        run: |
+          swift build --target PluginSmoke
+          .build/debug/PluginSmoke | tee plugin-smoke.out
+          grep -q "BoolMsg.typeInfo.typeName" plugin-smoke.out
+
+  build-linux:
+    name: Build & Test (Linux)
+    needs: [lint-swift-format]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift 6.3.1
+        run: |
+          curl -fsSL "https://download.swift.org/swift-6.3.1-release/ubuntu2404/swift-6.3.1-RELEASE/swift-6.3.1-RELEASE-ubuntu24.04.tar.gz" -o /tmp/swift.tar.gz
+          sudo mkdir -p /opt/swift
+          sudo tar -xzf /tmp/swift.tar.gz -C /opt/swift --strip-components=1
+          echo "/opt/swift/usr/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test --parallel
+
+  build-windows:
+    name: Build & Test (Windows)
+    needs: [lint-swift-format]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@eeda069c5bc95ac8a9ac5cea7d4f588ae5420ca5 # v0.4.0
+        with:
+          branch: swift-6.3.1-release
+          tag: 6.3.1-RELEASE
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test --parallel
+
+  build-docs:
+    name: Build (DocC)
+    needs: [lint-swift-format]
+    runs-on: macos-26
+    env:
+      SWIFT_ROS2_DOCS_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.4.1.app
+      - name: Generate DocC
+        run: swift package generate-documentation --target SwiftROS2Messages
+      - name: Check DocC coverage
+        run: bash Scripts/check-docc-coverage.sh
+
+  build-android:
+    name: Build (Android ${{ matrix.abi }})
+    needs: [lint-swift-format]
+    # Pin explicitly to ubuntu-24.04 — the Swift 6.3.1 tarball downloaded
+    # below is the ubuntu24.04 build, so the runner must stay on 24.04.
+    # Using ubuntu-latest would break Android CI the day GitHub promotes
+    # 26.04 (glibc / libstdc++ mismatch against the 24.04 swiftmodule).
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            triple: aarch64-unknown-linux-android28
+          - abi: x86_64
+            triple: x86_64-unknown-linux-android28
+    steps:
+      - uses: actions/checkout@v4
+      # Swift 6.3.1 — matches the Android SDK below. compnerd/gha-setup-swift
+      # silently installs Swift 6.3 on Linux regardless of `tag:`, which
+      # mismatches the SDK's prebuilt swiftmodules (\"module compiled
+      # with Swift 6.3.1 cannot be imported by the Swift 6.3 compiler\").
+      # Download directly from swift.org instead, same pattern as
+      # build-linux above.
+      - name: Install Swift 6.3.1
+        run: |
+          curl -fsSL "https://download.swift.org/swift-6.3.1-release/ubuntu2404/swift-6.3.1-RELEASE/swift-6.3.1-RELEASE-ubuntu24.04.tar.gz" \
+            -o /tmp/swift.tar.gz
+          sudo mkdir -p /opt/swift
+          sudo tar -xzf /tmp/swift.tar.gz -C /opt/swift --strip-components=1
+          echo "/opt/swift/usr/bin" >> "$GITHUB_PATH"
+      # The Swift Android SDK artifact bundle does not ship its own
+      # ndk-sysroot — it ships a setup-android-sdk.sh script that
+      # hydrates ndk-sysroot from a locally installed NDK in-place.
+      # Without running it, clang can't find <sys/time.h> / <string.h>
+      # under the SDK's --sysroot. The script requires NDK >= r27.
+      - name: Install Android NDK r27c
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          add-to-path: false
+      - name: Install Swift Android SDK
+        env:
+          # Pinned via repository variables so values can be rotated
+          # without a code change. Set both at
+          # github.com/swift-ros2/swift-ros2-rosidl/settings/variables/actions:
+          #   SWIFT_ANDROID_SDK_URL      — full https URL of the
+          #                                .artifactbundle from
+          #                                swift.org/install/android
+          #   SWIFT_ANDROID_SDK_CHECKSUM — SHA-256 hex string from the
+          #                                same page
+          # If either is unset, this step fails fast with an actionable
+          # message instead of leaving the swift sdk install command to
+          # surface a less-clear error.
+          SDK_URL: ${{ vars.SWIFT_ANDROID_SDK_URL }}
+          SDK_CHECKSUM: ${{ vars.SWIFT_ANDROID_SDK_CHECKSUM }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          if [[ -z "$SDK_URL" || -z "$SDK_CHECKSUM" ]]; then
+            echo "ERROR: repository variables SWIFT_ANDROID_SDK_URL and SWIFT_ANDROID_SDK_CHECKSUM must both be set." >&2
+            echo "       Configure them at https://github.com/swift-ros2/swift-ros2-rosidl/settings/variables/actions." >&2
+            exit 1
+          fi
+          swift sdk install "$SDK_URL" --checksum "$SDK_CHECKSUM"
+          # Hydrate the SDK's ndk-sysroot by symlinking $ANDROID_NDK_HOME
+          # into the installed bundle, using the SDK's bundled helper.
+          SDK_BUNDLE=$(find ~/.config/swiftpm/swift-sdks -maxdepth 1 -type d -name '*android*.artifactbundle' | head -1)
+          if [[ -z "$SDK_BUNDLE" ]]; then
+            echo "ERROR: installed Swift Android SDK bundle not found under ~/.config/swiftpm/swift-sdks" >&2
+            exit 1
+          fi
+          bash "$SDK_BUNDLE/swift-android/scripts/setup-android-sdk.sh"
+          swift sdk list
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: swift build --swift-sdk ${{ matrix.triple }} -v
