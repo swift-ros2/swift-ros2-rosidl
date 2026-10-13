@@ -622,8 +622,11 @@ extension Pipeline {
     /// never into a library product.
     ///
     /// A type of a dependency-only package gets an extension, in
-    /// `OracleSamples+Dependencies.swift`, only when an emitted type reaches it through its
-    /// fields (directly or through other dependency types), and never a sample of its own.
+    /// `OracleSamples_Dependencies.swift`, only when an emitted type reaches it through its
+    /// fields (directly or through other dependency types), and never a sample of its own. The
+    /// underscore keeps that name apart from `OracleSamples+<Pkg>.swift`: PascalCase package
+    /// names contain no underscore, so no package, not even one called `dependencies`, can
+    /// produce it.
     public static func generateOracleSamples(
         _ runs: [PackageRun], moduleNames: ModuleNames = [:]
     ) throws -> [GeneratedFile] {
@@ -682,7 +685,7 @@ extension Pipeline {
         while let name = reachedDependencyTypes.popLast() {
             guard addedDependencyTypes.insert(name).inserted, let ir = dependencyIRs[name] else { continue }
             let swiftName = c.nameOverrides[name] ?? SwiftEmitter.swiftStructName(typeName: ir.typeName)
-            add(ir, swiftName: swiftName, file: "OracleSamples+Dependencies.swift", overrides: c.nameOverrides)
+            add(ir, swiftName: swiftName, file: "OracleSamples_Dependencies.swift", overrides: c.nameOverrides)
         }
 
         // The generated-file banner plus one lexicographically sorted import block (swift-format's

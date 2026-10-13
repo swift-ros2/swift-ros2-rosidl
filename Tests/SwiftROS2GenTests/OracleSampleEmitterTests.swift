@@ -85,8 +85,8 @@ struct OracleSampleEmitterTests {
         ])
         #expect(
             withHeader.map(\.relativePath)
-                == ["OracleSamples+Dependencies.swift", "OracleSamples+StdMsgs.swift", "OracleSamples.swift"])
-        let dependencies = try #require(withHeader.first)
+                == ["OracleSamples+StdMsgs.swift", "OracleSamples_Dependencies.swift", "OracleSamples.swift"])
+        let dependencies = try #require(withHeader.first { $0.relativePath == "OracleSamples_Dependencies.swift" })
         #expect(dependencies.contents.contains("extension Time {"))
         #expect(!dependencies.contents.contains("extension DurationMsg {"))
         let registry = try #require(withHeader.last)
@@ -97,5 +97,38 @@ struct OracleSampleEmitterTests {
         ])
         #expect(primitives.map(\.relativePath) == ["OracleSamples+StdMsgs.swift", "OracleSamples.swift"])
         #expect(!primitives.contains { $0.contents.contains("import BuiltinInterfaces") })
+    }
+
+    @Test("the dependency extensions file cannot collide with a package called `dependencies`")
+    func dependencyFileNameIsCollisionFree() throws {
+        func dir(_ name: String) throws -> URL {
+            try #require(Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Resources/IDL"))
+        }
+        // A ROS package literally named `dependencies` PascalCases to the module `Dependencies`.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageDir = root.appendingPathComponent("dependencies")
+        try FileManager.default.createDirectory(
+            at: packageDir.appendingPathComponent("msg"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(
+            at: try dir("std_msgs_with_header").appendingPathComponent("msg/Header.msg"),
+            to: packageDir.appendingPathComponent("msg/Header.msg"))
+
+        let files = try Pipeline.generateOracleSamples([
+            .init(input: PackageInput(name: "dependencies", directory: packageDir)),
+            .init(
+                input: PackageInput(name: "builtin_interfaces", directory: try dir("builtin_interfaces")),
+                emit: false),
+        ])
+        let paths = files.map(\.relativePath)
+        #expect(Set(paths).count == paths.count)
+        #expect(
+            paths
+                == ["OracleSamples+Dependencies.swift", "OracleSamples_Dependencies.swift", "OracleSamples.swift"])
+        let own = try #require(files.first { $0.relativePath == "OracleSamples+Dependencies.swift" })
+        let reached = try #require(files.first { $0.relativePath == "OracleSamples_Dependencies.swift" })
+        #expect(own.contents.contains("extension Header {"))
+        #expect(!own.contents.contains("extension Time {"))
+        #expect(reached.contents.contains("extension Time {"))
     }
 }
