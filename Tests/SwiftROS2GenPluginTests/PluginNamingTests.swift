@@ -13,7 +13,7 @@ private enum PluginNaming {
         "Int", "Int8", "Int16", "Int32", "Int64",
         "UInt", "UInt8", "UInt16", "UInt32", "UInt64",
         "Float", "Float32", "Float64", "Double",
-        "Empty",
+        "Empty", "Duration", "Range", "Clock",
     ]
 
     static func swiftStructName(typeName: String) -> String {
@@ -73,6 +73,16 @@ struct PluginNamingTests {
         let bareURL = PluginNaming.outputFileURL(
             for: bareInput, packageName: "sensor_msgs", outputRoot: outputRoot)
         #expect(bareURL.path == "/tmp/wd/Generated/SensorMsgs/Imu.swift")
+    }
+
+    @Test("a plugin user's Range.msg produces RangeMsg.swift")
+    func rangeOutputGetsMsgSuffix() {
+        let outputRoot = URL(fileURLWithPath: "/tmp/wd/Generated", isDirectory: true)
+        let rangeInput = URL(fileURLWithPath: "/some/where/msg/Range.msg")
+        let rangeURL = PluginNaming.outputFileURL(
+            for: rangeInput, packageName: "sensor_msgs", outputRoot: outputRoot)
+        #expect(rangeURL.lastPathComponent == "RangeMsg.swift")
+        #expect(rangeURL.path == "/tmp/wd/Generated/SensorMsgs/RangeMsg.swift")
     }
 
     @Test("multiple inputs each get one output, names mirror Pipeline.swift")

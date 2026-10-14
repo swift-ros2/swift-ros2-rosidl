@@ -3,12 +3,10 @@
 // service plumbing inside this repo) compile without a churn-only rename PR.
 // New code should use the bare generated name (`Time`).
 //
-// `builtin_interfaces/Duration` is intentionally NOT regenerated in Phase 2:
-// the emitter would name it `Duration`, which shadows `Swift.Duration` in any
-// translation unit that imports `SwiftROS2Messages` (notably `SwiftROS2/`,
-// where async timeouts are `Swift.Duration`). A follow-up will teach the
-// emitter a stdlib-collision rename rule (`Duration` -> `BuiltinInterfacesDuration`)
-// before we re-add it to the generated set.
+// `builtin_interfaces/Duration` is not part of the committed generated set yet.
+// The emitter names it `DurationMsg` (the `Msg` suffix applies to every ROS name
+// equal to a Swift standard-library type), so regenerating it no longer shadows
+// `Swift.Duration` in translation units that import `SwiftROS2Messages`.
 
 import Foundation
 

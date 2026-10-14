@@ -49,7 +49,7 @@ struct PipelineEndToEndTests {
         ])
         let names = Set(files.map(\.relativePath))
         #expect(names.contains("BuiltinInterfaces/Time.swift"))
-        #expect(names.contains("BuiltinInterfaces/Duration.swift"))
+        #expect(names.contains("BuiltinInterfaces/DurationMsg.swift"))
         #expect(names.contains("GeometryMsgs/Vector3.swift"))
         #expect(names.contains("GeometryMsgs/Pose.swift"))
         #expect(names.contains("GeometryMsgs/PoseStamped.swift"))

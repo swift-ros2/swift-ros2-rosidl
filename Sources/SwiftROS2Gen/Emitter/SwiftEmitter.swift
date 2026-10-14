@@ -1,13 +1,14 @@
 /// Converts a ``MessageIR`` into the Swift source text for a generated ``ROS2Message`` type.
 public enum SwiftEmitter {
-    /// Type names that collide with Swift stdlib types — these keep the `Msg` suffix so the
-    /// generated symbol does not shadow the stdlib one. Anything else emits as bare PascalCase.
+    /// ROS type names equal to a Swift standard-library type name. They keep the `Msg`
+    /// suffix so the generated symbol does not shadow the standard-library type in files that
+    /// import the generated module.
     private static let collisionTypeNames: Set<String> = [
         "Bool", "String",
         "Int", "Int8", "Int16", "Int32", "Int64",
         "UInt", "UInt8", "UInt16", "UInt32", "UInt64",
         "Float", "Float32", "Float64", "Double",
-        "Empty",
+        "Empty", "Duration", "Range", "Clock",
     ]
 
     /// Render `ir` to Swift source.
