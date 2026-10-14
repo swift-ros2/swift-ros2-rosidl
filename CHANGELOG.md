@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.0-rc.2
+
+- `ROS2ServiceTypeInfo.serviceTypeHash` carries the service-level type hash, and
+  `ROS2ActionTypeInfo.sendGoalServiceTypeHash` / `getResultServiceTypeHash` carry the hashes
+  of an action's `SendGoal` and `GetResult` services. rmw_zenoh_cpp keys services and action
+  services by these hashes, not by the request hash. The new initializer parameters default
+  to `nil`, so existing call sites compile unchanged.
+- swift-ros2-gen emits these hashes for every `.srv` and `.action` (nil for Humble). It builds
+  the `<Srv>_Event` and `ServiceEventInfo` types that the service description needs, so no
+  `service_msgs` dependency is required, and `--verify-hashes` also checks service-level,
+  `_Event` and action-level hashes. `ActionMsgs` and `RclInterfaces` are regenerated.
+- swift-ros2-gen reports an unresolved element type of an array or sequence field
+  (`Foo[]`, `Foo[3]`, `Foo[<=3]`) as `GeneratorError.unresolvedNestedType` instead of
+  stopping on a precondition failure.
+- The README walks through generating a message package, packaging it as a Swift module and
+  publishing it with swift-ros2, and documents `SwiftROS2GenPlugin` and `--verify-hashes`.
+
 ## 1.0.0-rc.1
 
 - Extracted from swift-ros2 2.3.2 (CDR, message protocols, runtime interfaces, swift-ros2-gen)
