@@ -1,3 +1,4 @@
+import BuiltinInterfaces
 import Foundation
 import XCTest
 

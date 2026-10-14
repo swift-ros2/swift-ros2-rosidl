@@ -3,3 +3,4 @@
 *.xcodeproj
 Package.resolved.bak
 /oracle-corpus/
+/.idl/

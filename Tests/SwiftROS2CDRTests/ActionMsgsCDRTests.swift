@@ -1,4 +1,7 @@
+import ActionMsgs
+import BuiltinInterfaces
 import Foundation
+import UniqueIdentifierMsgs
 import XCTest
 
 @testable import SwiftROS2CDR

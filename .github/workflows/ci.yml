@@ -164,3 +164,21 @@ jobs:
         run: swift --version
       - name: Build
         run: swift build --swift-sdk ${{ matrix.triple }} -v
+
+  regen-drift:
+    name: Generated sources match idl.lock
+    needs: [lint-swift-format]
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.4.1.app
+      - name: Regenerate (fetches the IDL pinned in idl.lock first)
+        run: bash Scripts/regenerate.sh
+      - name: Check for drift
+        run: |
+          if [ -n "$(git status --porcelain -- Sources)" ]; then
+            git status --short -- Sources && git diff -- Sources
+            echo "::error::generated sources are stale — run Scripts/regenerate.sh and commit"
+            exit 1
+          fi
