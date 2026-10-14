@@ -91,6 +91,16 @@ class Layout:
             for value in values:
                 self.value(element, value)
 
+    def struct(self, value):
+        """Walk a nested message. rosidl gives an empty structure one uint8 member,
+        `structure_needs_at_least_one_member`, which rclpy does not list as a field."""
+        fields = value.get_fields_and_field_types()
+        if not fields:
+            self.primitives(1, 1)
+            return
+        for name, nested_type in fields.items():
+            self.value(nested_type, getattr(value, name))
+
     def value(self, field_type, value):
         sequence = re.fullmatch(r"sequence<(.+?)(?:,\s*\d+)?>", field_type)
         bounded = re.fullmatch(r"(.+)\[<=\d+\]", field_type)
@@ -105,8 +115,7 @@ class Layout:
         elif field_type in PRIMITIVE_SIZES:
             self.primitives(PRIMITIVE_SIZES[field_type], 1)
         elif "/" in field_type:
-            for name, nested_type in value.get_fields_and_field_types().items():
-                self.value(nested_type, getattr(value, name))
+            self.struct(value)
         else:
             raise ValueError(f"cannot derive padding for field type '{field_type}'")
 
@@ -114,8 +123,7 @@ class Layout:
 def padding_offsets(msg):
     """Offsets of the alignment-padding bytes in the CDR encoding of `msg`."""
     layout = Layout()
-    for name, field_type in msg.get_fields_and_field_types().items():
-        layout.value(field_type, getattr(msg, name))
+    layout.struct(msg)
     return layout.padding
 
 
