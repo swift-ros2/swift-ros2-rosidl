@@ -11,7 +11,8 @@ public enum SetLoggerLevelsSrv: ROS2ServiceType {
         requestTypeName: "rcl_interfaces/srv/SetLoggerLevels_Request",
         responseTypeName: "rcl_interfaces/srv/SetLoggerLevels_Response",
         requestTypeHash: "RIHS01_4e7768e0f4c749205f35bc05449f83fad18c42de52c16b1934d66c2f68ffd862",
-        responseTypeHash: "RIHS01_ba51739027e57cb9120015737f4618579684047d862b2b16a76bc399d987d6d3"
+        responseTypeHash: "RIHS01_ba51739027e57cb9120015737f4618579684047d862b2b16a76bc399d987d6d3",
+        serviceTypeHash: "RIHS01_3ff86cb4e91fbf9abae15c234ecc874448de6ece8e193401c077cf116e4f6d78"
     )
 
     public typealias Request = SetLoggerLevelsRequest

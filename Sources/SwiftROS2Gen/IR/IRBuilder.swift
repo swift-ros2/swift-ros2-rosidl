@@ -348,20 +348,14 @@ extension IRBuilder {
 
 extension IRBuilder {
     /// Compute RIHS01 hashes for every contained ``MessageIR`` (Goal / Result
-    /// / Feedback + 5 wire wrappers) and write them into
-    /// `ir.perDistroHashes[distro]`. The provided `extraRegistry` must contain
-    /// at least `unique_identifier_msgs/msg/UUID` and
-    /// `builtin_interfaces/msg/Time` because the wrappers reference them; the
-    /// per-action user IRs are added automatically.
+    /// / Feedback + 5 wire wrappers) and the `<Type>_SendGoal` / `<Type>_GetResult`
+    /// services, and write them into `ir.perDistroHashes[distro]`. The provided
+    /// `extraRegistry` must contain at least `unique_identifier_msgs/msg/UUID`
+    /// because the wrappers reference it; the per-action user IRs and the
+    /// service-description types (``ServiceDescription``) are added automatically.
     ///
-    /// We intentionally do **not** synthesize the action-level
-    /// `<pkg>/action/<Type>` hash. rosidl computes that from a six-field
-    /// record that references additional service-shaped wrappers
-    /// (`<Type>_SendGoal`, `<Type>_GetResult`, plus `_Event` types and
-    /// `service_msgs/msg/ServiceEventInfo`) that this generator does not
-    /// emit. The wire format only depends on the eight wrapper / block hashes
-    /// stored here; emitting a synthetic action-level value that disagrees
-    /// with upstream would be worse than omitting it.
+    /// The action-level `<pkg>/action/<Type>` hash is not stored: no wire codec
+    /// reads it. `swift-ros2-gen --verify-hashes` still checks it.
     public static func populateActionHashes(
         _ ir: inout ActionIR,
         distro: String,
@@ -379,6 +373,7 @@ extension IRBuilder {
         registry[ir.getResultRequest.rosTypeName] = ir.getResultRequest
         registry[ir.getResultResponse.rosTypeName] = ir.getResultResponse
         registry[ir.feedbackMessage.rosTypeName] = ir.feedbackMessage
+        ServiceDescription.register(action: ir, into: &registry)
 
         let goalHash = RIHS01.hash(ir.goal, registry: registry)
         let resultHash = RIHS01.hash(ir.result, registry: registry)
@@ -388,6 +383,14 @@ extension IRBuilder {
         let grReqHash = RIHS01.hash(ir.getResultRequest, registry: registry)
         let grRespHash = RIHS01.hash(ir.getResultResponse, registry: registry)
         let fbMsgHash = RIHS01.hash(ir.feedbackMessage, registry: registry)
+        let sgServiceHash = RIHS01.hash(
+            ServiceDescription.serviceIR(
+                package: ir.package, kind: .action, serviceName: "\(ir.typeName)_SendGoal"),
+            registry: registry)
+        let grServiceHash = RIHS01.hash(
+            ServiceDescription.serviceIR(
+                package: ir.package, kind: .action, serviceName: "\(ir.typeName)_GetResult"),
+            registry: registry)
 
         // Store per-message hashes on the contained IRs so the emitter (which
         // reuses the message emitter for each wrapper) can read them out of
@@ -409,7 +412,9 @@ extension IRBuilder {
             sendGoalResponseHash: sgRespHash,
             getResultRequestHash: grReqHash,
             getResultResponseHash: grRespHash,
-            feedbackMessageHash: fbMsgHash
+            feedbackMessageHash: fbMsgHash,
+            sendGoalServiceHash: sgServiceHash,
+            getResultServiceHash: grServiceHash
         )
     }
 }

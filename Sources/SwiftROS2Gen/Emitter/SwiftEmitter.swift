@@ -171,7 +171,8 @@ public enum SwiftEmitter {
 
     /// Render a `ROS2ServiceType` umbrella enum that ties the previously-emitted
     /// request / response struct halves together. The umbrella owns the canonical
-    /// `<pkg>/srv/<Service>` `serviceName` plus the per-half RIHS01 hashes; the
+    /// `<pkg>/srv/<Service>` `serviceName`, the per-half RIHS01 hashes and the
+    /// service-level hash (`serviceHash`, see ``ServiceDescription``); the
     /// halves themselves carry their own `<pkg>/srv/<Service>_Request|Response`
     /// `typeInfo` (so they are usable as standalone messages too, which is what
     /// the wire layer hands to publishers / subscriptions internally).
@@ -183,6 +184,7 @@ public enum SwiftEmitter {
         responseStructName: String,
         requestHash: String?,
         responseHash: String?,
+        serviceHash: String? = nil,
         sourceLabel: String,
         extraImports: [String] = [],
         moduleNames: ModuleNames = [:]
@@ -202,7 +204,8 @@ public enum SwiftEmitter {
         out += "        requestTypeName: \"\(package)/srv/\(serviceTypeName)_Request\",\n"
         out += "        responseTypeName: \"\(package)/srv/\(serviceTypeName)_Response\",\n"
         out += "        requestTypeHash: \(swiftOptionalString(requestHash)),\n"
-        out += "        responseTypeHash: \(swiftOptionalString(responseHash))\n"
+        out += "        responseTypeHash: \(swiftOptionalString(responseHash)),\n"
+        out += "        serviceTypeHash: \(swiftOptionalString(serviceHash))\n"
         out += "    )\n"
         out += "\n"
         out += "    public typealias Request = \(requestStructName)\n"
@@ -277,7 +280,9 @@ public enum SwiftEmitter {
         out += "        sendGoalResponseTypeHash: \"\(hashes.sendGoalResponseHash)\",\n"
         out += "        getResultRequestTypeHash: \"\(hashes.getResultRequestHash)\",\n"
         out += "        getResultResponseTypeHash: \"\(hashes.getResultResponseHash)\",\n"
-        out += "        feedbackMessageTypeHash: \"\(hashes.feedbackMessageHash)\"\n"
+        out += "        feedbackMessageTypeHash: \"\(hashes.feedbackMessageHash)\",\n"
+        out += "        sendGoalServiceTypeHash: \(swiftOptionalString(hashes.sendGoalServiceHash)),\n"
+        out += "        getResultServiceTypeHash: \(swiftOptionalString(hashes.getResultServiceHash))\n"
         out += "    )\n"
         out += "\n"
         out += emitActionInnerStruct(

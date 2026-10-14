@@ -11,7 +11,8 @@ public enum SetParametersSrv: ROS2ServiceType {
         requestTypeName: "rcl_interfaces/srv/SetParameters_Request",
         responseTypeName: "rcl_interfaces/srv/SetParameters_Response",
         requestTypeHash: "RIHS01_130d46386b7e84ea9ecf60608a4d83cbe5e5cb7c6cc5b712b7a4e3a6c254e932",
-        responseTypeHash: "RIHS01_7a0e8140a0b8d98308fa81a5403a766e610af29a239caf54b7553227906fc266"
+        responseTypeHash: "RIHS01_7a0e8140a0b8d98308fa81a5403a766e610af29a239caf54b7553227906fc266",
+        serviceTypeHash: "RIHS01_56eed9a67e169f9cb6c1f987bc88f868c14a8fc9f743a263bc734c154015d7e0"
     )
 
     public typealias Request = SetParametersRequest

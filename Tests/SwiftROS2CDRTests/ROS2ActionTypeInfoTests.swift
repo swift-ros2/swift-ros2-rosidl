@@ -20,6 +20,8 @@ final class ROS2ActionTypeInfoTests: XCTestCase {
         XCTAssertNil(info.getResultRequestTypeHash)
         XCTAssertNil(info.getResultResponseTypeHash)
         XCTAssertNil(info.feedbackMessageTypeHash)
+        XCTAssertNil(info.sendGoalServiceTypeHash)
+        XCTAssertNil(info.getResultServiceTypeHash)
     }
 
     func testFullEightHashInitializer() {
@@ -39,5 +41,25 @@ final class ROS2ActionTypeInfoTests: XCTestCase {
         XCTAssertEqual(info.getResultRequestTypeHash, "RIHS01_grrq")
         XCTAssertEqual(info.getResultResponseTypeHash, "RIHS01_grrp")
         XCTAssertEqual(info.feedbackMessageTypeHash, "RIHS01_fm")
+        XCTAssertNil(info.sendGoalServiceTypeHash)
+        XCTAssertNil(info.getResultServiceTypeHash)
+    }
+
+    func testServiceHashes() {
+        let info = ROS2ActionTypeInfo(
+            actionName: "example_interfaces/action/Fibonacci",
+            goalTypeHash: "RIHS01_g",
+            resultTypeHash: "RIHS01_r",
+            feedbackTypeHash: "RIHS01_f",
+            sendGoalRequestTypeHash: "RIHS01_sgrq",
+            sendGoalResponseTypeHash: "RIHS01_sgrp",
+            getResultRequestTypeHash: "RIHS01_grrq",
+            getResultResponseTypeHash: "RIHS01_grrp",
+            feedbackMessageTypeHash: "RIHS01_fm",
+            sendGoalServiceTypeHash: "RIHS01_sg",
+            getResultServiceTypeHash: "RIHS01_gr"
+        )
+        XCTAssertEqual(info.sendGoalServiceTypeHash, "RIHS01_sg")
+        XCTAssertEqual(info.getResultServiceTypeHash, "RIHS01_gr")
     }
 }

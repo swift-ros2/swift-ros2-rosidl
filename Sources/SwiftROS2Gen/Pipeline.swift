@@ -391,6 +391,15 @@ extension Pipeline {
                 "\(svc.typeName)Response"
         }
         try validateAllReferencesResolved(registry: registry)
+        // The types rosidl adds to service and action type descriptions, for the service-level
+        // and action-level hashes. Added after the reference check: they are never emitted.
+        for svc in collectedServices {
+            ServiceDescription.register(
+                package: svc.package, kind: .srv, serviceName: svc.typeName, into: &registry)
+        }
+        for act in collectedActions {
+            ServiceDescription.register(action: act.actionIR, into: &registry)
+        }
         return Collected(
             unresolvedIRs: unresolvedIRs, collectedServices: collectedServices,
             collectedActions: collectedActions, registry: registry, nameOverrides: nameOverrides,
@@ -537,6 +546,9 @@ extension Pipeline {
             let resKey = "\(svc.package)/srv/\(svc.typeName)_Response"
             let requestHash = hashByRosName[reqKey]
             let responseHash = hashByRosName[resKey]
+            let serviceHash = RIHS01.hash(
+                ServiceDescription.serviceIR(package: svc.package, kind: .srv, serviceName: svc.typeName),
+                for: "jazzy", registry: c.registry)
             let requestStructName = c.nameOverrides[reqKey] ?? "\(svc.typeName)Request"
             let responseStructName = c.nameOverrides[resKey] ?? "\(svc.typeName)Response"
             let umbrellaName =
@@ -550,6 +562,7 @@ extension Pipeline {
                 responseStructName: responseStructName,
                 requestHash: requestHash,
                 responseHash: responseHash,
+                serviceHash: serviceHash,
                 sourceLabel: "\(svc.package)/srv/\(svc.typeName).srv",
                 extraImports: extraImports,
                 moduleNames: moduleNames
@@ -833,15 +846,42 @@ extension Pipeline {
                     ))
             }
         }
-        // NOTE: the action-level `<pkg>/action/<Type>` description is *not*
-        // verified here. rosidl's canonical action-level type description
-        // is built from the three constituent services (SendGoal,
-        // GetResult, FeedbackMessage), not as a flat record of three
-        // nested fields the way `IRBuilder.populateActionHashes`
-        // synthesizes it for the generator's local typeInfo. The eight
-        // wrapper / block hashes (which carry the wire format) are
-        // verified above; the action-level hash drift is tracked as a
-        // separate generator follow-up.
+        // The types rosidl adds to service and action type descriptions (see
+        // ``ServiceDescription``): every service's service-level and `_Event` types, and every
+        // action's action-level type plus its `_SendGoal` / `_GetResult` services and their
+        // `_Event` types. Each is in scope for the distributions of the service or action.
+        func distros(of rosTypeName: String) -> Set<String> {
+            c.unresolvedIRs.first { $0.ir.rosTypeName == rosTypeName }?.distros ?? []
+        }
+        var synthesized: [(ir: MessageIR, topLevel: String, distros: Set<String>)] = []
+        for svc in c.collectedServices {
+            let svcDistros = distros(of: "\(svc.package)/srv/\(svc.typeName)_Request")
+            for name in [svc.typeName, "\(svc.typeName)_Event"] {
+                if let ir = c.registry["\(svc.package)/srv/\(name)"] {
+                    synthesized.append((ir, svc.typeName, svcDistros))
+                }
+            }
+        }
+        for act in c.collectedActions {
+            let actDistros = distros(of: act.actionIR.goal.rosTypeName)
+            for name in [
+                act.typeName, "\(act.typeName)_SendGoal", "\(act.typeName)_SendGoal_Event",
+                "\(act.typeName)_GetResult", "\(act.typeName)_GetResult_Event",
+            ] {
+                if let ir = c.registry["\(act.package)/action/\(name)"] {
+                    synthesized.append((ir, act.typeName, actDistros))
+                }
+            }
+        }
+        for (ir, topLevel, irDistros) in synthesized {
+            for distro in irDistros.sorted() where distro != "humble" {
+                if let allow = allowedDistros, !allow.contains(distro) { continue }
+                out.append(
+                    VerifyPlanEntry(
+                        package: ir.package, kind: ir.kind, typeName: ir.typeName, topLevelTypeName: topLevel,
+                        distro: distro, expectedHash: RIHS01.hash(ir, for: distro, registry: c.registry)))
+            }
+        }
         out.removeAll { c.dependencyPackages.contains($0.package) }
         return out
     }

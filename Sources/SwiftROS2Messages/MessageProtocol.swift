@@ -35,18 +35,31 @@ public struct ROS2ServiceTypeInfo: Sendable {
     /// Type hash for Jazzy+ on the response side, nil for Humble
     public let responseTypeHash: String?
 
+    /// Type hash for Jazzy+ of the service itself (`<pkg>/srv/<Service>`), nil for Humble or
+    /// when unknown.
+    ///
+    /// rosidl hashes a service from a description with `request_message`, `response_message`
+    /// and `event_message` fields. This is the hash rmw_zenoh_cpp puts in a service's key
+    /// expression and liveliness token, next to the service type name (for example
+    /// `std_srvs::srv::dds_::Trigger_`), rather than the request or response hash.
+    public let serviceTypeHash: String?
+
+    /// Creates service type information. `serviceTypeHash` defaults to `nil`, so existing
+    /// call sites compile unchanged.
     public init(
         serviceName: String,
         requestTypeName: String,
         responseTypeName: String,
         requestTypeHash: String? = nil,
-        responseTypeHash: String? = nil
+        responseTypeHash: String? = nil,
+        serviceTypeHash: String? = nil
     ) {
         self.serviceName = serviceName
         self.requestTypeName = requestTypeName
         self.responseTypeName = responseTypeName
         self.requestTypeHash = requestTypeHash
         self.responseTypeHash = responseTypeHash
+        self.serviceTypeHash = serviceTypeHash
     }
 }
 
@@ -56,8 +69,17 @@ public struct ROS2ServiceTypeInfo: Sendable {
 /// synthesized wrapper hashes that actually travel on the wire
 /// (`<Action>_SendGoal_Request`, `<Action>_SendGoal_Response`,
 /// `<Action>_GetResult_Request`, `<Action>_GetResult_Response`,
-/// `<Action>_FeedbackMessage`). All hashes are optional — `nil` means
-/// `TypeHashNotSupported` on Jazzy or absent on Humble.
+/// `<Action>_FeedbackMessage`), and the hashes of the two services the action
+/// declares (`<Action>_SendGoal`, `<Action>_GetResult`). All hashes are optional —
+/// `nil` means `TypeHashNotSupported` on Jazzy or absent on Humble.
+///
+/// rmw_zenoh_cpp keys an action's roles as services and topics of these types:
+/// `send_goal` uses `<Action>_SendGoal` with ``sendGoalServiceTypeHash``,
+/// `get_result` uses `<Action>_GetResult` with ``getResultServiceTypeHash``,
+/// `feedback` uses `<Action>_FeedbackMessage` with ``feedbackMessageTypeHash``.
+/// The `cancel_goal` service (`action_msgs/srv/CancelGoal`) and the `status` topic
+/// (`action_msgs/msg/GoalStatusArray`) are the same for every action; their hashes
+/// come from those types' own `typeInfo`.
 public struct ROS2ActionTypeInfo: Sendable {
     /// ROS format action name (e.g., "example_interfaces/action/Fibonacci")
     public let actionName: String
@@ -71,6 +93,11 @@ public struct ROS2ActionTypeInfo: Sendable {
     public let getResultRequestTypeHash: String?
     public let getResultResponseTypeHash: String?
     public let feedbackMessageTypeHash: String?
+
+    /// Hash of the `<Action>_SendGoal` service, the type of the action's `send_goal` service.
+    public let sendGoalServiceTypeHash: String?
+    /// Hash of the `<Action>_GetResult` service, the type of the action's `get_result` service.
+    public let getResultServiceTypeHash: String?
 
     /// Legacy 3-hash initializer — kept for ABI/source compatibility with 0.6.x. Synthesized
     /// wrapper hashes default to `nil`.
@@ -93,7 +120,8 @@ public struct ROS2ActionTypeInfo: Sendable {
         )
     }
 
-    /// Full initializer — supply any subset of hashes; unknown ones stay `nil`.
+    /// Full initializer — supply any subset of hashes; unknown ones stay `nil`. The two
+    /// service hashes default to `nil`, so eight-hash call sites compile unchanged.
     public init(
         actionName: String,
         goalTypeHash: String?,
@@ -103,7 +131,9 @@ public struct ROS2ActionTypeInfo: Sendable {
         sendGoalResponseTypeHash: String?,
         getResultRequestTypeHash: String?,
         getResultResponseTypeHash: String?,
-        feedbackMessageTypeHash: String?
+        feedbackMessageTypeHash: String?,
+        sendGoalServiceTypeHash: String? = nil,
+        getResultServiceTypeHash: String? = nil
     ) {
         self.actionName = actionName
         self.goalTypeHash = goalTypeHash
@@ -114,6 +144,8 @@ public struct ROS2ActionTypeInfo: Sendable {
         self.getResultRequestTypeHash = getResultRequestTypeHash
         self.getResultResponseTypeHash = getResultResponseTypeHash
         self.feedbackMessageTypeHash = feedbackMessageTypeHash
+        self.sendGoalServiceTypeHash = sendGoalServiceTypeHash
+        self.getResultServiceTypeHash = getResultServiceTypeHash
     }
 }
 
