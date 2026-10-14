@@ -24,6 +24,9 @@ public enum GeneratorError: Error, CustomStringConvertible {
     case invalidExtraImport(String)
     /// A package is passed both as an emitted input and as a dependency-only input.
     case conflictingPackageRoles(String)
+    /// A field exists in only some modern distributions (Jazzy and later), which generated
+    /// types cannot express.
+    case modernDistroDivergence(type: String, field: String, presentIn: [String], missingFrom: [String])
 
     public var description: String {
         switch self {
@@ -39,6 +42,9 @@ public enum GeneratorError: Error, CustomStringConvertible {
                 "invalid --extra-import '\(value)' — expected a Swift module identifier (e.g. 'SwiftROS2Messages' or 'My.Nested.Module')"
         case .conflictingPackageRoles(let name):
             return "package '\(name)' is passed both as --input and as --dependency"
+        case .modernDistroDivergence(let type, let field, let presentIn, let missingFrom):
+            return
+                "\(type): field '\(field)' exists in \(presentIn) but not in \(missingFrom) — generated types support one modern shape (Jazzy and later); differences among modern distributions are not supported"
         }
     }
 }
@@ -251,6 +257,22 @@ extension Pipeline {
         }
     }
 
+    /// Generated types model two wire shapes: legacy (Humble) and modern (every later
+    /// distribution). A field present in only some modern distributions cannot be expressed,
+    /// so generation stops instead of emitting one distribution's shape for all of them.
+    static func validateModernAgreement(_ ir: MessageIR) throws {
+        let modern = Set(ir.perDistroFieldPresence.keys).subtracting(["humble"])
+        for field in ir.fields {
+            guard case .onlyIn(let distros) = field.availability, distros != ["humble"] else { continue }
+            let present = distros.subtracting(["humble"])
+            if present != modern {
+                throw GeneratorError.modernDistroDivergence(
+                    type: ir.rosTypeName, field: field.ros2Name,
+                    presentIn: present.sorted(), missingFrom: modern.subtracting(present).sorted())
+            }
+        }
+    }
+
     /// Multi-package generation. All inputs are parsed first, then the resulting IRs
     /// are aggregated into a registry. Hashing and emission run after the registry is
     /// complete so cross-package references (e.g. `std_msgs/Header → builtin_interfaces/Time`)
@@ -333,6 +355,7 @@ extension Pipeline {
                 let merged = try parseAndMergeMultiDistroPackage(runs: pkgRuns)
                 let primaryRun = pkgRuns.first!
                 for entry in merged {
+                    try validateModernAgreement(entry.ir)
                     unresolvedIRs.append(
                         (run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel))
                 }
@@ -709,6 +732,7 @@ extension Pipeline {
                 let merged = try parseAndMergeMultiDistroPackage(runs: pkgRuns)
                 let primaryRun = pkgRuns.first!
                 for entry in merged {
+                    try validateModernAgreement(entry.ir)
                     unresolvedIRs.append(
                         (
                             run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel,

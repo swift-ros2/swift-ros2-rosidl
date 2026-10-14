@@ -8,18 +8,11 @@ import SwiftROS2Messages
 /// sensor_msgs/msg/Range
 public struct Range: ROS2Message, Equatable, Sendable {
     public static func typeInfo(for distro: ROS2Distro) -> ROS2MessageTypeInfo {
-        switch distro {
-        case .humble:
-            return ROS2MessageTypeInfo(
-                typeName: "sensor_msgs/msg/Range",
-                typeHash: nil
-            )
-        case .jazzy, .kilted, .lyrical, .rolling:
-            return ROS2MessageTypeInfo(
-                typeName: "sensor_msgs/msg/Range",
-                typeHash: "RIHS01_b42b62562e93cbfe9d42b82fe5994dfa3d63d7d5c90a317981703f7388adff3a"
-            )
-        }
+        ROS2MessageTypeInfo(
+            typeName: "sensor_msgs/msg/Range",
+            typeHash: distro.isLegacySchema
+                ? nil : "RIHS01_b42b62562e93cbfe9d42b82fe5994dfa3d63d7d5c90a317981703f7388adff3a"
+        )
     }
 
     public static var typeInfo: ROS2MessageTypeInfo { typeInfo(for: .jazzy) }

@@ -518,29 +518,23 @@ public enum SwiftEmitter {
         return normalized.count > 1
     }
 
-    /// Emit `static func typeInfo(for distro:)` plus the `static var typeInfo`
-    /// shim. Splits the `ROS2Distro` cases into the legacy (humble) arm and the
-    /// modern arm (`IRBuilder.modernDistros`).
+    /// Emit `static func typeInfo(for distro:)` plus the `static var typeInfo` shim.
+    ///
+    /// Generated types know two wire shapes: legacy (Humble) and modern (every later
+    /// distribution, which share one hash). Branching on `isLegacySchema` instead of switching
+    /// over `ROS2Distro` keeps the file compiling when a distribution is added.
     static func emitTypeInfoFactory(_ ir: MessageIR) -> String {
+        let legacyHash = ir.perDistroHashes["humble"] ?? nil
+        let modernHash = IRBuilder.modernDistros.lazy.compactMap { ir.perDistroHashes[$0] ?? nil }.first
         var out = ""
         out += "    public static func typeInfo(for distro: ROS2Distro) -> ROS2MessageTypeInfo {\n"
-        out += "        switch distro {\n"
-        let humbleHash = (ir.perDistroHashes["humble"] ?? nil)
-        out += "        case .humble:\n"
-        out += "            return ROS2MessageTypeInfo(\n"
-        out += "                typeName: \"\(ir.rosTypeName)\",\n"
-        out += "                typeHash: \(quotedOrNil(humbleHash))\n"
-        out += "            )\n"
-        let modernHash = IRBuilder.modernDistros.lazy
-            .compactMap { ir.perDistroHashes[$0] ?? nil }
-            .first
-        let modernCases = IRBuilder.modernDistros.map { ".\($0)" }.joined(separator: ", ")
-        out += "        case \(modernCases):\n"
-        out += "            return ROS2MessageTypeInfo(\n"
-        out += "                typeName: \"\(ir.rosTypeName)\",\n"
-        out += "                typeHash: \(quotedOrNil(modernHash))\n"
-        out += "            )\n"
-        out += "        }\n"
+        out += "        ROS2MessageTypeInfo(\n"
+        out += "            typeName: \"\(ir.rosTypeName)\",\n"
+        // swift-format's layout for a ternary that does not fit on one line: a RIHS01 hash
+        // after `typeHash: distro.isLegacySchema ? nil : ` exceeds the 120-column limit.
+        out += "            typeHash: distro.isLegacySchema\n"
+        out += "                ? \(quotedOrNil(legacyHash)) : \(quotedOrNil(modernHash))\n"
+        out += "        )\n"
         out += "    }\n"
         out += "\n"
         out += "    public static var typeInfo: ROS2MessageTypeInfo { typeInfo(for: .jazzy) }\n"
