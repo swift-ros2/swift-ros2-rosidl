@@ -74,5 +74,21 @@ jobs:
 ```
 
 The workflow checks every RIHS01 hash against `osrf/ros:<distro>-desktop` and round-trips
-every generated sample through Swift and rclpy. Jazzy and Lyrical run on every event; Kilted
-and Rolling run on the caller's weekly `schedule` and are non-blocking.
+every generated sample through Swift, and the samples of the row's distribution through
+rclpy. Jazzy and Lyrical run on every event; Kilted and Rolling run on the caller's weekly
+`schedule` and are non-blocking.
+
+The corpus executable is a copy of `Sources/RosidlOracleCorpus/main.swift` compiled with the
+generated `OracleSamples*.swift` files. The workflow runs it as
+`swift run <corpus-product> <output-dir> <distro>`:
+
+- It decodes and re-encodes every generated sample in Swift and exits 1 when any round-trip
+  changes the bytes.
+- It writes `<output-dir>/<pkg>/<msg|srv|action>/<Name>.cdr` for the samples of the types
+  `<distro>` has: each sample lists the distributions whose IDL has its type, so a type that
+  only some distributions have (geometry_msgs `Pose2D` is not in Lyrical) is left out of the
+  others. `rolling` gets the Lyrical set unless Rolling IDL was generated. Without `<distro>`
+  it writes every sample; `<output-dir>` defaults to `oracle-corpus`.
+- It exits 2 when no IDL was generated for `<distro>`.
+
+`Scripts/cdr-oracle.py` stays strict: a sample whose type the oracle image lacks fails.

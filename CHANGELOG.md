@@ -12,7 +12,15 @@
 - Generated files import the modules of the packages they reference (derived imports).
 - Distro-safe `typeInfo(for:)`: Humble gets the legacy schema and every later distribution the modern hash; a field that differs among modern distributions stops generation.
 - ROS names equal to a Swift standard-library type get a `Msg` suffix, now including `DurationMsg`, `RangeMsg` and `ClockMsg`.
-- The generator emits CDR oracle samples, and a Swift round-trip check verifies them.
+- The generator emits CDR oracle samples, and a Swift round-trip check verifies them. Each
+  sample lists the distributions whose IDL has its type, and the corpus executable takes a
+  distribution argument (`<corpus> <output-dir> <distro>`) that writes only that
+  distribution's samples; `interface-oracles.yml` passes the row's distribution.
+- Services and actions of a package read from several distributions carry the distributions
+  that have them, as messages do: an action that only a later distribution has is generated
+  (it was read from the first distribution only), an action whose shape differs between
+  distributions is rejected like a service, and `--verify-hashes` checks service halves and
+  action parts in each distribution that has them.
 - Upstream IDL is pinned in `idl.lock` and fetched by `Scripts/fetch-idl.sh` into a gitignored cache (no submodules); generated Swift is committed.
 - Reusable `interface-oracles.yml` workflow for hash and CDR oracles in interface repositories, with an `apt-packages` input.
 - Empty action goals, results and feedback encode and decode rosidl's `structure_needs_at_least_one_member` byte, as empty messages and service halves already did; before, they wrote no body and rosidl subscribers rejected them.

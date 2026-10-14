@@ -67,7 +67,9 @@ jobs:
           swift run swift-ros2-gen "${ARGS[@]}" --verify-hashes "$IMAGE" --distros "${{ matrix.ros_distro }}" --diagnose
       - name: CDR oracle
         run: |
-          swift run "${{ inputs.corpus-product }}" "$PWD/oracle-corpus"
+          # Only the samples of the types this distribution has: the oracle image fails on a
+          # type its distribution lacks.
+          swift run "${{ inputs.corpus-product }}" "$PWD/oracle-corpus" "${{ matrix.ros_distro }}"
           docker run --rm -v "$PWD/oracle-corpus:/corpus:ro" \
             -v "$PWD/${{ inputs.rosidl-path }}/Scripts/cdr-oracle.py:/cdr-oracle.py:ro" \
             "$IMAGE" bash -c "source /opt/ros/${{ matrix.ros_distro }}/setup.bash && python3 /cdr-oracle.py /corpus"
