@@ -16,3 +16,8 @@
 - The generator emits CDR oracle samples, and a Swift round-trip check verifies them.
 - Upstream IDL is pinned in `idl.lock` and fetched by `Scripts/fetch-idl.sh` into a gitignored cache (no submodules); generated Swift is committed.
 - Reusable `interface-oracles.yml` workflow for hash and CDR oracles in interface repositories, with an `apt-packages` input.
+- Empty action goals, results and feedback encode and decode rosidl's `structure_needs_at_least_one_member` byte, as empty messages and service halves already did; before, they wrote no body and rosidl subscribers rejected them.
+
+### Known issues
+
+- `wstring` (bounded or not) is encoded like `string` (UTF-8, NUL-terminated), which no RMW accepts: Fast-CDR-based RMWs (`rmw_fastrtps_cpp`, `rmw_zenoh_cpp`) and Jazzy's `rmw_cyclonedds_cpp` expect a UTF-16 code-unit count followed by one 4-byte unit per UTF-16 code unit, and Lyrical's `rmw_cyclonedds_cpp` expects a byte count followed by 2-byte units.

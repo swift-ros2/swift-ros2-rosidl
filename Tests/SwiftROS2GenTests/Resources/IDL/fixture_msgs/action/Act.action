@@ -1,0 +1,4 @@
+# Empty goal and feedback: rosidl gives each the uint8 structure_needs_at_least_one_member.
+---
+int32 value
+---

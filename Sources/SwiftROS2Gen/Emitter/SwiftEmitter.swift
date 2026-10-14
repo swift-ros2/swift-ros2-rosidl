@@ -112,7 +112,7 @@ public enum SwiftEmitter {
             }
             out += "    public init() {}\n"
             out += "\n"
-            // Every empty rosidl struct — message or service half — carries
+            // Every empty rosidl struct — message, service half or action part — carries
             // the implicit `uint8 structure_needs_at_least_one_member`
             // sentinel, and rosidl SERIALIZES it (one 0x00 body byte after
             // the encapsulation header). The RIHS01 hasher already models the
@@ -334,11 +334,19 @@ public enum SwiftEmitter {
         var out = ""
         out += "\(indent)public struct \(name): CDRCodable, Equatable, Sendable {\n"
         if fields.isEmpty {
+            // rosidl gives an empty goal / result / feedback the same implicit
+            // `uint8 structure_needs_at_least_one_member` as any other empty
+            // structure (see ``emitMessageStruct``) and serializes it, so the
+            // codec writes and reads one 0x00 body byte here too.
             out += "\(indent)    public init() {}\n"
             out += "\n"
-            out += "\(indent)    public func encode(to encoder: CDREncoder) throws {}\n"
+            out += "\(indent)    public func encode(to encoder: CDREncoder) throws {\n"
+            out += "\(indent)        encoder.writeUInt8(0)\n"
+            out += "\(indent)    }\n"
             out += "\n"
-            out += "\(indent)    public init(from decoder: CDRDecoder) throws {}\n"
+            out += "\(indent)    public init(from decoder: CDRDecoder) throws {\n"
+            out += "\(indent)        _ = try decoder.readUInt8()\n"
+            out += "\(indent)    }\n"
         } else {
             for field in fields {
                 if let comment = boundedComment(field.type) {
