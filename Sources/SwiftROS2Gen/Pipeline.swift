@@ -1141,20 +1141,33 @@ extension Pipeline {
     private static func validateAllReferencesResolved(registry: [String: MessageIR]) throws {
         for (_, ir) in registry {
             for field in ir.fields {
-                guard case .nested(let pkg, let type) = field.type else { continue }
+                guard let target = elementNestedReference(of: field.type) else { continue }
                 // Phase 6: a nested reference may resolve under msg, srv, or
                 // action — accept the first kind found in the registry.
                 var resolved = false
                 for kind in MessageKind.allCases {
-                    if registry["\(pkg)/\(kind.rawValue)/\(type)"] != nil {
+                    if registry["\(target.package)/\(kind.rawValue)/\(target.typeName)"] != nil {
                         resolved = true
                         break
                     }
                 }
                 if !resolved {
-                    throw GeneratorError.unresolvedNestedType(package: pkg, typeName: type)
+                    throw GeneratorError.unresolvedNestedType(package: target.package, typeName: target.typeName)
                 }
             }
+        }
+    }
+
+    /// The nested type a field ultimately refers to, looking through fixed-size arrays and
+    /// sequences (bounded or not). `nil` for primitives and strings.
+    private static func elementNestedReference(of fieldType: FieldType) -> (package: String, typeName: String)? {
+        switch fieldType {
+        case .primitive, .boundedString:
+            return nil
+        case .nested(let package, let typeName):
+            return (package, typeName)
+        case .array(let element, _), .sequence(let element, _):
+            return elementNestedReference(of: element)
         }
     }
 }
