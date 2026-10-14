@@ -59,6 +59,13 @@ struct SwiftROS2GenCommand: ParsableCommand {
 
     @Option(
         name: .long,
+        help:
+            "Also write CDR oracle sample sources (one file per package plus OracleSamples.swift) to this directory. Emit mode only."
+    )
+    var emitOracleSamples: String?
+
+    @Option(
+        name: .long,
         help: """
             Compare each generated type's RIHS01 hash against the oracle running inside the named Docker image \
             (e.g. 'osrf/ros:jazzy-desktop'). Implies --dry-run; exits non-zero on mismatch.
@@ -163,14 +170,26 @@ struct SwiftROS2GenCommand: ParsableCommand {
                     typesAllowList: nil, emit: false))
         }
         let files: [GeneratedFile]
+        var oracleSamples: [GeneratedFile] = []
         do {
             files = try Pipeline.generateMulti(runs, extraImports: extraImport, moduleNames: moduleNames)
+            if emitOracleSamples != nil {
+                oracleSamples = try Pipeline.generateOracleSamples(runs, moduleNames: moduleNames)
+            }
         } catch let err as GeneratorError {
             FileHandle.standardError.write(Data("error: \(err)\n".utf8))
             throw ExitCode.failure
         }
+        try write(files, to: outputRoot)
+        if let samplesDirectory = emitOracleSamples {
+            try write(oracleSamples, to: URL(fileURLWithPath: samplesDirectory, isDirectory: true))
+        }
+    }
+
+    /// Writes `files` under `root`, or prints what would be written with `--dry-run`.
+    func write(_ files: [GeneratedFile], to root: URL) throws {
         for file in files {
-            let absolute = outputRoot.appendingPathComponent(file.relativePath)
+            let absolute = root.appendingPathComponent(file.relativePath)
             if dryRun {
                 FileHandle.standardOutput.write(
                     Data("WRITE \(absolute.path) (\(file.contents.utf8.count) bytes)\n".utf8))
