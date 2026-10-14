@@ -2,6 +2,7 @@
 // Source: action_msgs/msg/GoalStatus.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// action_msgs/msg/GoalStatus
 public struct GoalStatus: CDRCodable, Equatable, Sendable {

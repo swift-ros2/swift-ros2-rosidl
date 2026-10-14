@@ -2,6 +2,7 @@
 // Source: common_interfaces-jazzy/std_msgs/msg/Float64.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// std_msgs/msg/Float64
 public struct Float64Msg: ROS2Message, Equatable, Sendable {

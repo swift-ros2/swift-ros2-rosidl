@@ -2,6 +2,7 @@
 // Source: common_interfaces-jazzy/geometry_msgs/msg/Vector3.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// geometry_msgs/msg/Vector3
 public struct Vector3: ROS2Message, Equatable, Sendable {

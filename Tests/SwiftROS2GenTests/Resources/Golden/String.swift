@@ -2,6 +2,7 @@
 // Source: common_interfaces-jazzy/std_msgs/msg/String.msg
 
 import SwiftROS2CDR
+import SwiftROS2Messages
 
 /// std_msgs/msg/String
 public struct StringMsg: ROS2Message, Equatable, Sendable {

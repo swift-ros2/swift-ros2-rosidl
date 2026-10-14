@@ -115,7 +115,8 @@ public enum Pipeline {
     public static func generate(
         for input: PackageInput,
         typesAllowList: Set<String>? = nil,
-        extraImports: [String] = []
+        extraImports: [String] = [],
+        moduleNames: ModuleNames = [:]
     ) throws -> [GeneratedFile] {
         try ModuleIdentifier.validateAll(extraImports)
         let msgDir = input.directory.appendingPathComponent("msg", isDirectory: true)
@@ -170,7 +171,8 @@ public enum Pipeline {
                     isNested: isNested,
                     structNameOverride: nameOverride,
                     nestedNameOverrides: Pipeline.defaultSwiftNameOverrides,
-                    extraImports: extraImports
+                    extraImports: extraImports,
+                    moduleNames: moduleNames
                 )
                 let pascalPackage = pascal(input.name)
                 let structName = nameOverride ?? SwiftEmitter.swiftStructName(typeName: typeName)
@@ -240,7 +242,8 @@ extension Pipeline {
     /// even though the source IDLs come from multiple distros.
     public static func generateMulti(
         _ runs: [PackageRun],
-        extraImports: [String] = []
+        extraImports: [String] = [],
+        moduleNames: ModuleNames = [:]
     ) throws -> [GeneratedFile] {
         try ModuleIdentifier.validateAll(extraImports)
         var unresolvedIRs: [(run: PackageRun, ir: MessageIR, sourceLabel: String)] = []
@@ -470,7 +473,8 @@ extension Pipeline {
                 isNested: isNested,
                 structNameOverride: nameOverride,
                 nestedNameOverrides: nameOverrides,
-                extraImports: extraImports
+                extraImports: extraImports,
+                moduleNames: moduleNames
             )
             let pascalPackage = pascal(entry.ir.package)
             let structName =
@@ -505,7 +509,8 @@ extension Pipeline {
                 requestHash: requestHash,
                 responseHash: responseHash,
                 sourceLabel: "\(svc.package)/srv/\(svc.typeName).srv",
-                extraImports: extraImports
+                extraImports: extraImports,
+                moduleNames: moduleNames
             )
             let pascalPackage = pascal(svc.package)
             results.append(
@@ -529,7 +534,8 @@ extension Pipeline {
                 actionIR,
                 sourceLabel: label,
                 nestedNameOverrides: nameOverrides,
-                extraImports: extraImports
+                extraImports: extraImports,
+                moduleNames: moduleNames
             )
             let pascalPackage = pascal(act.package)
             results.append(
