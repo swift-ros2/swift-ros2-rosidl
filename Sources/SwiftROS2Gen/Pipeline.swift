@@ -22,6 +22,8 @@ public enum GeneratorError: Error, CustomStringConvertible {
     case parse(ParseError)
     case unresolvedNestedType(package: String, typeName: String)
     case invalidExtraImport(String)
+    /// A package is passed both as an emitted input and as a dependency-only input.
+    case conflictingPackageRoles(String)
 
     public var description: String {
         switch self {
@@ -31,10 +33,12 @@ public enum GeneratorError: Error, CustomStringConvertible {
             return error.description
         case .unresolvedNestedType(let pkg, let type):
             return
-                "unresolved nested type '\(pkg)/\(type)' — pass a --input for '\(pkg)' on the same CLI invocation"
+                "unresolved nested type '\(pkg)/\(type)' — pass --input or --dependency for '\(pkg)' on the same CLI invocation"
         case .invalidExtraImport(let value):
             return
                 "invalid --extra-import '\(value)' — expected a Swift module identifier (e.g. 'SwiftROS2Messages' or 'My.Nested.Module')"
+        case .conflictingPackageRoles(let name):
+            return "package '\(name)' is passed both as --input and as --dependency"
         }
     }
 }
@@ -222,10 +226,28 @@ extension Pipeline {
     public struct PackageRun: Sendable {
         public let input: PackageInput
         public let typesAllowList: Set<String>?
+        /// `false` for a dependency-only package: parsed, resolved and hashed, never emitted.
+        public let emit: Bool
 
-        public init(input: PackageInput, typesAllowList: Set<String>? = nil) {
+        public init(input: PackageInput, typesAllowList: Set<String>? = nil, emit: Bool = true) {
             self.input = input
             self.typesAllowList = typesAllowList
+            self.emit = emit
+        }
+
+        /// The run to parse: a dependency-only run ignores `--types`, so every
+        /// type an emitted type may reference is in the registry.
+        var parseRun: PackageRun {
+            emit ? self : PackageRun(input: input, typesAllowList: nil, emit: false)
+        }
+    }
+
+    /// Throws ``GeneratorError/conflictingPackageRoles(_:)`` when a package is
+    /// passed both as an emitted input and as a dependency-only input.
+    private static func checkPackageRoles(_ runsByPackage: [String: [PackageRun]]) throws {
+        for (name, group) in runsByPackage.sorted(by: { $0.key < $1.key })
+        where Set(group.map(\.emit)).count > 1 {
+            throw GeneratorError.conflictingPackageRoles(name)
         }
     }
 
@@ -253,10 +275,12 @@ extension Pipeline {
         // different distros for the same logical package.
         var runsByPackage: [String: [PackageRun]] = [:]
         var packageOrder: [String] = []
-        for run in runs {
+        for run in runs.map(\.parseRun) {
             if runsByPackage[run.input.name] == nil { packageOrder.append(run.input.name) }
             runsByPackage[run.input.name, default: []].append(run)
         }
+        try checkPackageRoles(runsByPackage)
+        let dependencyPackages = Set(runs.filter { !$0.emit }.map(\.input.name))
         for pkg in packageOrder {
             let pkgRuns = runsByPackage[pkg]!
             if pkgRuns.count == 1 {
@@ -459,6 +483,8 @@ extension Pipeline {
                 perDistroFieldPresence: entry.ir.perDistroFieldPresence
             )
             let key = "\(entry.ir.package)/\(entry.ir.kind.rawValue)/\(entry.ir.typeName)"
+            // Dependency-only packages are hashed above but emitted elsewhere.
+            if dependencyPackages.contains(entry.ir.package) { continue }
             // Action IRs (the three user blocks + five wrappers) are emitted
             // together in a single per-action Swift file below, not as
             // standalone files.
@@ -490,7 +516,7 @@ extension Pipeline {
         // `<Service>Srv.Request` / `.Response` and read the canonical service-level
         // hashes from `typeInfo`. The umbrella reuses the per-half hashes that
         // already landed in the registry above.
-        for svc in collectedServices {
+        for svc in collectedServices where !dependencyPackages.contains(svc.package) {
             let reqKey = "\(svc.package)/srv/\(svc.typeName)_Request"
             let resKey = "\(svc.package)/srv/\(svc.typeName)_Response"
             let requestHash = hashByRosName[reqKey]
@@ -525,7 +551,7 @@ extension Pipeline {
         // The action-level + wrapper hashes come from
         // ``IRBuilder/populateActionHashes(_:distro:extraRegistry:)`` which
         // reuses the global registry assembled above.
-        for act in collectedActions {
+        for act in collectedActions where !dependencyPackages.contains(act.package) {
             var actionIR = act.actionIR
             IRBuilder.populateActionHashes(
                 &actionIR, distro: "jazzy", extraRegistry: registry)
@@ -608,10 +634,12 @@ extension Pipeline {
 
         var runsByPackage: [String: [PackageRun]] = [:]
         var packageOrder: [String] = []
-        for run in runs {
+        for run in runs.map(\.parseRun) {
             if runsByPackage[run.input.name] == nil { packageOrder.append(run.input.name) }
             runsByPackage[run.input.name, default: []].append(run)
         }
+        try checkPackageRoles(runsByPackage)
+        let dependencyPackages = Set(runs.filter { !$0.emit }.map(\.input.name))
         for pkg in packageOrder {
             let pkgRuns = runsByPackage[pkg]!
             if pkgRuns.count == 1 {
@@ -808,6 +836,7 @@ extension Pipeline {
         // verified above; the action-level hash drift is tracked as a
         // separate generator follow-up.
         _ = collectedActions
+        out.removeAll { dependencyPackages.contains($0.package) }
         return out
     }
 }
@@ -1094,7 +1123,7 @@ extension Pipeline {
     /// nested reference cannot be resolved from the supplied `runs`.
     public static func buildMessageRegistry(_ runs: [PackageRun]) throws -> [String: MessageIR] {
         var registry: [String: MessageIR] = [:]
-        for run in runs {
+        for run in runs.map(\.parseRun) {
             for entry in try parsePackage(run: run) {
                 registry[entry.ir.rosTypeName] = entry.ir
             }

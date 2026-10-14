@@ -19,6 +19,13 @@ struct SwiftROS2GenCommand: ParsableCommand {
     @Option(
         name: .long,
         help:
+            "<package_name>=<directory>@<distro>. Repeatable. A package whose types are referenced and hashed but not emitted (they live in another Swift module). Same format as --input."
+    )
+    var dependency: [String] = []
+
+    @Option(
+        name: .long,
+        help:
             "Output directory root (per-package subdirectories are created underneath). Required for emit mode; ignored when --verify-hashes is set."
     )
     var output: String = ""
@@ -148,6 +155,13 @@ struct SwiftROS2GenCommand: ParsableCommand {
                     typesAllowList: allowList
                 ))
         }
+        for raw in dependency {
+            let pkg = try parseInput(raw)
+            runs.append(
+                .init(
+                    input: PackageInput(name: pkg.packageName, directory: pkg.directory, distro: pkg.distro),
+                    typesAllowList: nil, emit: false))
+        }
         let files: [GeneratedFile]
         do {
             files = try Pipeline.generateMulti(runs, extraImports: extraImport, moduleNames: moduleNames)
@@ -194,6 +208,13 @@ struct SwiftROS2GenCommand: ParsableCommand {
                     ),
                     typesAllowList: allowList
                 ))
+        }
+        for raw in dependency {
+            let pkg = try parseInput(raw)
+            runs.append(
+                .init(
+                    input: PackageInput(name: pkg.packageName, directory: pkg.directory, distro: pkg.distro),
+                    typesAllowList: nil, emit: false))
         }
         let denyList: Set<String> =
             excludeTypes.map {
