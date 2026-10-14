@@ -69,10 +69,13 @@ struct ActionHashGoldenTests {
         #expect(
             h.feedbackMessageHash
                 == "RIHS01_c1de71afd52e49a89c53d8262366884185bc0a02f78ce051c4e46b0a7fe59bb2")
-        // No action-level (`<pkg>/action/<Type>`) hash is exposed: rosidl
-        // computes it from a six-field record that references additional
-        // service-shaped wrappers (`Fibonacci_SendGoal`, `Fibonacci_GetResult`,
-        // their `_Event` siblings, and `service_msgs/msg/ServiceEventInfo`)
-        // that this generator does not emit. See ``IRBuilder/populateActionHashes``.
+        // The SendGoal / GetResult services, which rmw_zenoh_cpp keys the action's
+        // `send_goal` / `get_result` services by.
+        #expect(
+            h.sendGoalServiceHash
+                == "RIHS01_d1a57fb2a4afe8c21e34fb10db206f16ce6729b28531141472df92277c55b557")
+        #expect(
+            h.getResultServiceHash
+                == "RIHS01_1b0de0d5d29dc955d92f546706568428632771db13ec84c15ec1c1a59f424a57")
     }
 }

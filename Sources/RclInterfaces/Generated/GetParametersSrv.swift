@@ -11,7 +11,8 @@ public enum GetParametersSrv: ROS2ServiceType {
         requestTypeName: "rcl_interfaces/srv/GetParameters_Request",
         responseTypeName: "rcl_interfaces/srv/GetParameters_Response",
         requestTypeHash: "RIHS01_135a9e1c3d7cebef792f6687d7ddf99949b21a0bd9a320d863a9110a3f5cf4d6",
-        responseTypeHash: "RIHS01_9fa773b46e39cc5d02db6224d8fd520bb9caeeffc2b27c96c1e59431baba9f2a"
+        responseTypeHash: "RIHS01_9fa773b46e39cc5d02db6224d8fd520bb9caeeffc2b27c96c1e59431baba9f2a",
+        serviceTypeHash: "RIHS01_bf9803d5c74cf989a5de3e0c2e99444599a627c7ff75f97b8c05b01003675cbc"
     )
 
     public typealias Request = GetParametersRequest

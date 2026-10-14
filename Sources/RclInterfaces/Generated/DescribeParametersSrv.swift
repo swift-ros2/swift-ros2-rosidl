@@ -11,7 +11,8 @@ public enum DescribeParametersSrv: ROS2ServiceType {
         requestTypeName: "rcl_interfaces/srv/DescribeParameters_Request",
         responseTypeName: "rcl_interfaces/srv/DescribeParameters_Response",
         requestTypeHash: "RIHS01_05dd1c2bc87dec2627105c8070d6f9725c781a4f2ab852975bf105462b82b644",
-        responseTypeHash: "RIHS01_ad6747319613c6131589e062e095b469a46cc764f7d0f12a001a49e6cd893995"
+        responseTypeHash: "RIHS01_ad6747319613c6131589e062e095b469a46cc764f7d0f12a001a49e6cd893995",
+        serviceTypeHash: "RIHS01_845b484d71eb0673dae682f2e3ba3c4851a65a3dcfb97bddd82c5b57e91e4cff"
     )
 
     public typealias Request = DescribeParametersRequest

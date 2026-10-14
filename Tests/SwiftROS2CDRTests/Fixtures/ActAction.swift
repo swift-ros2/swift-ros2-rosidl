@@ -17,7 +17,9 @@ public enum ActAction: ROS2Action {
         sendGoalResponseTypeHash: "RIHS01_698b5552b9a818944890898a9e6744255b47f97f87939336bca563b3c843b9f7",
         getResultRequestTypeHash: "RIHS01_f9146aac8360004a3b3d17249cf08729c3c53b8259fdfac9a5bbbfe8ae045766",
         getResultResponseTypeHash: "RIHS01_6c398a543d3679dfc83947df1ad599f5a5744dc69595d4fa1a1a0997e363dc84",
-        feedbackMessageTypeHash: "RIHS01_88a019abff2821a93d2497687c843f160b14222d3db1e96185a270f4492f0615"
+        feedbackMessageTypeHash: "RIHS01_88a019abff2821a93d2497687c843f160b14222d3db1e96185a270f4492f0615",
+        sendGoalServiceTypeHash: "RIHS01_5d51c79cac3c8719c95c7a366df5a66ea0ab42941b3f54bece4fe00c97509b0f",
+        getResultServiceTypeHash: "RIHS01_61dad0729d4ae8cd6bd5d564e33a7003fab0801b4fc39e5fa7efa070e5e90a27"
     )
 
     public struct Goal: CDRCodable, Equatable, Sendable {

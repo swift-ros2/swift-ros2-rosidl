@@ -11,7 +11,8 @@ public enum SetParametersAtomicallySrv: ROS2ServiceType {
         requestTypeName: "rcl_interfaces/srv/SetParametersAtomically_Request",
         responseTypeName: "rcl_interfaces/srv/SetParametersAtomically_Response",
         requestTypeHash: "RIHS01_db0bd950ed5ed867a0e90b225e44dea382d762c0762ff3e0ee842190042a59e5",
-        responseTypeHash: "RIHS01_31b1a38c5b0b9d893ee24da45f69638f4561c78461d82d52750f429b534502b8"
+        responseTypeHash: "RIHS01_31b1a38c5b0b9d893ee24da45f69638f4561c78461d82d52750f429b534502b8",
+        serviceTypeHash: "RIHS01_0e192ef259c07fc3c07a13191d27002222e65e00ccec653ca05e856f79285fcd"
     )
 
     public typealias Request = SetParametersAtomicallyRequest

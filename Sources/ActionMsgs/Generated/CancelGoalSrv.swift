@@ -11,7 +11,8 @@ public enum CancelGoalSrv: ROS2ServiceType {
         requestTypeName: "action_msgs/srv/CancelGoal_Request",
         responseTypeName: "action_msgs/srv/CancelGoal_Response",
         requestTypeHash: "RIHS01_3d3c84653c1f96918086887e1dcb236faec88b81a5b14fd4cf4840065bcdf8af",
-        responseTypeHash: "RIHS01_35e682cf3f510e83c70a82a4aac888496dedee56773bf9d8e5e0aa81f9e1c960"
+        responseTypeHash: "RIHS01_35e682cf3f510e83c70a82a4aac888496dedee56773bf9d8e5e0aa81f9e1c960",
+        serviceTypeHash: "RIHS01_573d8b0a534451d7bc2ac8c5ffde8ac14b8593b7001175d0cd6516dcbeb8689a"
     )
 
     public typealias Request = CancelGoalRequest

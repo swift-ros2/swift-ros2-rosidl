@@ -1,13 +1,11 @@
-/// Per-distro hashes for an action's eight contained type descriptions.
+/// Per-distro hashes for an action's eight contained type descriptions and its two services.
 ///
 /// The eight member hashes are the wrapper / block hashes that either travel
 /// on the wire (the five wrappers) or describe the user-facing goal / result
-/// / feedback payloads. There is intentionally no action-level `<pkg>/action/
-/// <Type>` hash here: rosidl synthesizes that entry by referencing additional
-/// service-shaped wrappers (`<Type>_SendGoal`, `<Type>_GetResult`, plus the
-/// `_Event` types and `service_msgs/msg/ServiceEventInfo`) that this generator
-/// does not emit. We omit the value rather than synthesize one we cannot
-/// verify against upstream — none of the wire codecs read it.
+/// / feedback payloads. The two service hashes describe `<Type>_SendGoal` and
+/// `<Type>_GetResult` (see ``ServiceDescription``): rmw_zenoh_cpp keys the
+/// action's `send_goal` and `get_result` services by them. The action-level
+/// `<pkg>/action/<Type>` hash is not stored: no wire codec reads it.
 public struct ActionHashes: Equatable, Sendable {
     public var goalHash: String
     public var resultHash: String
@@ -17,6 +15,10 @@ public struct ActionHashes: Equatable, Sendable {
     public var getResultRequestHash: String
     public var getResultResponseHash: String
     public var feedbackMessageHash: String
+    /// Hash of the `<Type>_SendGoal` service.
+    public var sendGoalServiceHash: String?
+    /// Hash of the `<Type>_GetResult` service.
+    public var getResultServiceHash: String?
 
     public init(
         goalHash: String,
@@ -26,7 +28,9 @@ public struct ActionHashes: Equatable, Sendable {
         sendGoalResponseHash: String,
         getResultRequestHash: String,
         getResultResponseHash: String,
-        feedbackMessageHash: String
+        feedbackMessageHash: String,
+        sendGoalServiceHash: String? = nil,
+        getResultServiceHash: String? = nil
     ) {
         self.goalHash = goalHash
         self.resultHash = resultHash
@@ -36,6 +40,8 @@ public struct ActionHashes: Equatable, Sendable {
         self.getResultRequestHash = getResultRequestHash
         self.getResultResponseHash = getResultResponseHash
         self.feedbackMessageHash = feedbackMessageHash
+        self.sendGoalServiceHash = sendGoalServiceHash
+        self.getResultServiceHash = getResultServiceHash
     }
 }
 
