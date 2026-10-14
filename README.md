@@ -22,25 +22,254 @@ the transports and node API in [swift-ros2](https://github.com/swift-ros2/swift-
 
 ## Generating a type package
 
-Each ROS package becomes one Swift module named by PascalCasing the package
-(`geometry_msgs` → `GeometryMsgs`). Pass the packages you emit with `--input` and the
-packages they reference with `--dependency`; the generated files import the referenced
-modules.
+`swift-ros2-gen` turns the `.msg`, `.srv` and `.action` files of ROS packages into Swift
+modules, one module per ROS package, named by PascalCasing the package
+(`audio_common_msgs` → `AudioCommonMsgs`). The steps below generate `audio_common_msgs` (from
+[ros-drivers/audio_common](https://github.com/ros-drivers/audio_common)) into a Swift package
+called `AudioCommonMsgs` and publish its `AudioDataStamped` with swift-ros2.
+
+### 1. Get the generator
+
+`swift-ros2-gen` is an executable product of this package. Run it from a clone. Use the tag
+that the generated module will depend on, because generated code targets the protocols of that
+release:
 
 ```bash
-swift run swift-ros2-gen \
-  --input my_msgs=path/to/my_msgs@jazzy \
-  --dependency std_msgs=path/to/common_interfaces/std_msgs@jazzy \
-  --dependency builtin_interfaces=path/to/rcl_interfaces/builtin_interfaces@jazzy \
-  --output Sources
+git clone --branch 1.0.0-rc.1 https://github.com/swift-ros2/swift-ros2-rosidl.git
+cd swift-ros2-rosidl
+swift run swift-ros2-gen --help
 ```
 
-`--module <pkg>=<Module>` puts a package in a different module. Give each package once per
-distribution (`@humble`, `@jazzy`, `@kilted`, `@lyrical`) to merge them into one type; fields
-may differ between Humble and later distributions, not among the later ones.
+The generator resolves relative paths against the current directory, which is the clone. So
+`--output` must point at the `Sources` directory of **your** package, for example
+`../AudioCommonMsgs/Sources`, not at the clone.
 
-ROS names equal to a Swift standard-library type get a `Msg` suffix (`StringMsg`,
+When the generated module exists, you can regenerate it from your own package too:
+`swift run swift-ros2-gen …` in a package that depends on swift-ros2-rosidl runs the
+dependency's executable. This does not work for the first generation. Until the files exist,
+the module's target has no sources, and SwiftPM rejects the package ("target … is empty").
+
+### 2. Get the IDL
+
+The generator reads a ROS package directory with `msg/`, `srv/` and `action/` subdirectories.
+Each directory is passed as `<package>=<directory>@<distribution>`. Take the IDL of your
+package and of every package it references from the upstream repository at the branch of the
+distribution you target:
+
+| Packages | Repository |
+| --- | --- |
+| `std_msgs`, `geometry_msgs`, `sensor_msgs`, `nav_msgs`, `std_srvs`, … | [ros2/common_interfaces](https://github.com/ros2/common_interfaces) |
+| `builtin_interfaces`, `action_msgs`, `rcl_interfaces`, … | [ros2/rcl_interfaces](https://github.com/ros2/rcl_interfaces) |
+| `unique_identifier_msgs` | [ros2/unique_identifier_msgs](https://github.com/ros2/unique_identifier_msgs) |
+
+A ROS 2 installation works too: `/opt/ros/<distro>/share/<package>` holds `msg/*.msg`,
+`srv/*.srv` and `action/*.action`.
+
+```bash
+cd ..
+git clone --depth 1 --branch ros2 https://github.com/ros-drivers/audio_common.git
+git clone --depth 1 --branch jazzy https://github.com/ros2/common_interfaces.git
+git clone --depth 1 --branch jazzy https://github.com/ros2/rcl_interfaces.git
+```
+
+### 3. Pass every referenced package, transitively
+
+Pass the packages you emit with `--input` and every package they reference with
+`--dependency`. A dependency's types are parsed, resolved and hashed, but not emitted, because
+they live in another Swift module (swift-ros2-common-interfaces for `std_msgs` and the other
+standard packages, or this package for `builtin_interfaces`). The RIHS01 type hash covers every
+nested type down to the primitives, so the generator needs all of them. For example,
+`AudioDataStamped` has a `std_msgs/Header`, and `Header` has a `builtin_interfaces/Time`. A
+message with a `std_msgs/Header` and a `sensor_msgs/PointField[]` needs `std_msgs`,
+`builtin_interfaces` and `sensor_msgs`. A missing package stops generation with
+`unresolved nested type '<pkg>/<Type>' — pass --input or --dependency for '<pkg>'`.
+
+The generator parses each dependency as a whole package (`--types` filters only `--input`), so
+the references inside a dependency must resolve too. Passing all of `sensor_msgs` also needs
+`geometry_msgs`. You can pass it, or point `--dependency` at a directory that holds only the
+files you need, such as `deps/sensor_msgs/msg/PointField.msg`.
+
+```bash
+cd swift-ros2-rosidl
+mkdir -p ../AudioCommonMsgs/Sources
+swift run swift-ros2-gen \
+  --input audio_common_msgs=../audio_common/audio_common_msgs@jazzy \
+  --dependency std_msgs=../common_interfaces/std_msgs@jazzy \
+  --dependency builtin_interfaces=../rcl_interfaces/builtin_interfaces@jazzy \
+  --output ../AudioCommonMsgs/Sources
+```
+
+`--dry-run` prints the files instead of writing them. `--types A,B` emits only some types of
+the `--input` packages. `--module <pkg>=<Module>` puts a package's types in a different module,
+both for emitted packages and for the imports of the packages they reference.
+
+### Distributions
+
+The `@<distribution>` label says which distribution the IDL comes from. Generated types carry
+one RIHS01 hash for every distribution from Jazzy on. Humble has no type hashes; swift-ros2
+drops the hash there. Generated types also carry one field layout for Jazzy and later, plus a
+Humble layout when you pass Humble IDL and its fields differ.
+
+- **One snapshot for all distributions.** When you pass one snapshot, for example everything
+  `@jazzy`, the hash is the hash of that snapshot's IDL, your package and every dependency.
+  It is correct on every distribution whose IDL for those packages is the same. If a referenced
+  package changed in a later distribution, hosts on that distribution compute a different hash,
+  and rmw_zenoh_cpp does not match the topic. Generate from the IDL of the distributions you
+  deploy against, and check with `--verify-hashes` on each one.
+- **Humble differences.** If a message of yours has fields that differ between Humble and later
+  distributions, pass the package once per distribution (`…@humble` and `…@jazzy`). The
+  generator merges them into one type that picks its layout at run time. Differences among
+  Jazzy and later distributions are rejected, because generated types support only one modern
+  layout.
+
+ROS names that equal a Swift standard-library type get a `Msg` suffix (`StringMsg`,
 `DurationMsg`, `RangeMsg`).
+
+### Output layout
+
+`--output <dir>` writes `<dir>/<Module>/<Type>.swift`:
+
+- a message: `<Type>.swift`;
+- a service: `<Srv>Srv.swift` (the `ROS2ServiceType`), `<Srv>Request.swift` and
+  `<Srv>Response.swift`;
+- an action: `<Action>Action.swift`.
+
+```
+AudioCommonMsgs/
+├── Package.swift
+└── Sources/
+    └── AudioCommonMsgs/
+        ├── AudioData.swift
+        ├── AudioDataStamped.swift
+        └── AudioInfo.swift
+```
+
+There is no `Generated/` subdirectory, so `--output Sources` fills the target named after the
+module. The generator overwrites files and never deletes them, so remove the files of deleted
+types yourself. (This repository's `Scripts/regenerate.sh` copies its own output into
+`Sources/<Module>/Generated/`. That is a convention of this repository, not generator output.)
+
+### 4. Package the module
+
+A generated file imports `SwiftROS2CDR`, `SwiftROS2Messages` and the module of every package it
+references, so the module's target depends on those products. A program that publishes or
+subscribes depends on `SwiftROS2` from swift-ros2:
+
+```swift
+// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "AudioCommonMsgs",
+    platforms: [.iOS(.v16), .macOS(.v13)],
+    products: [
+        .library(name: "AudioCommonMsgs", targets: ["AudioCommonMsgs"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/swift-ros2/swift-ros2-rosidl.git", from: "1.0.0-rc.1"),
+        .package(url: "https://github.com/swift-ros2/swift-ros2-common-interfaces.git", from: "1.0.0-rc.1"),
+        .package(url: "https://github.com/swift-ros2/swift-ros2.git", from: "3.0.0-rc.1"),
+    ],
+    targets: [
+        // The generated types: every module a generated file imports is a dependency.
+        .target(
+            name: "AudioCommonMsgs",
+            dependencies: [
+                .product(name: "SwiftROS2CDR", package: "swift-ros2-rosidl"),
+                .product(name: "SwiftROS2Messages", package: "swift-ros2-rosidl"),
+                .product(name: "StdMsgs", package: "swift-ros2-common-interfaces"),
+            ]),
+        // A program that publishes them.
+        .executableTarget(
+            name: "audio-talker",
+            dependencies: [
+                "AudioCommonMsgs",
+                .product(name: "SwiftROS2", package: "swift-ros2"),
+                .product(name: "StdMsgs", package: "swift-ros2-common-interfaces"),
+            ]),
+    ]
+)
+```
+
+`Sources/audio-talker/main.swift`:
+
+```swift
+import AudioCommonMsgs
+import StdMsgs
+import SwiftROS2
+
+let context = try await ROS2Context(transport: .ddsMulticast(domainId: 0), distro: .jazzy)
+let node = try await context.createNode(name: "audio_talker", namespace: "/")
+let publisher = try await node.createPublisher(AudioDataStamped.self, topic: "audio")
+for i in 0..<30 {
+    try publisher.publish(
+        AudioDataStamped(header: Header(frameId: "mic"), audio: AudioData(data: [1, 2, 3, UInt8(i)])))
+    try await Task.sleep(nanoseconds: 500_000_000)
+}
+```
+
+On a host with `ros-jazzy-audio-common-msgs`,
+`ros2 topic echo /audio audio_common_msgs/msg/AudioDataStamped` prints the messages.
+
+### Checking hashes: `--verify-hashes`
+
+`--verify-hashes <image>` generates nothing. It compares the RIHS01 hash of every type of the
+`--input` packages with the hash rosidl wrote into
+`/opt/ros/<distro>/share/<pkg>/<msg|srv|action>/<Type>.json`, which it reads with
+`docker run --rm <image> cat …`. For a service or an action, it also checks every synthesized
+type (`_Request`, `_Response`, `_SendGoal_Request`, …). Dependencies are not checked. The
+command exits non-zero on a mismatch or a type the image lacks.
+
+It needs Docker and an image in which the packages are installed. `osrf/ros:<distro>-desktop`
+has the desktop packages; for others, add them:
+
+```bash
+printf 'FROM osrf/ros:jazzy-desktop\nRUN apt-get update && apt-get install -y --no-install-recommends ros-jazzy-audio-common-msgs\n' \
+  | docker build -t audio-oracle:jazzy -
+swift run swift-ros2-gen \
+  --input audio_common_msgs=../audio_common/audio_common_msgs@jazzy \
+  --dependency std_msgs=../common_interfaces/std_msgs@jazzy \
+  --dependency builtin_interfaces=../rcl_interfaces/builtin_interfaces@jazzy \
+  --verify-hashes audio-oracle:jazzy
+# hash-oracle: 3/3 types match
+```
+
+`--distros` selects the distributions to check. The default is every distribution of the
+inputs except Humble, and each one must be the distribution of the image. `--exclude-types A,B`
+skips types, and `--diagnose` writes the oracle JSON of a mismatch under
+`/tmp/swift-ros2-gen-diagnose/`.
+
+### The build plugin
+
+`SwiftROS2GenPlugin` runs `swift-ros2-gen` during the build, so the generated files are not
+committed. It covers only self-contained message packages:
+
+- It reads only `msg/*.msg` directly inside the target's directory. It ignores `.srv` and
+  `.action` files with a warning.
+- The target's name is the ROS package name, so name the target after the package
+  (`my_msgs`). The type names (`my_msgs/msg/Point2`) and the hashes use it.
+- It passes no `--dependency`. A field may use only primitives and other messages of the same
+  `msg/` directory; `builtin_interfaces/Time` or `std_msgs/Header` stops the build with
+  `unresolved nested type`.
+- It reads the IDL as Jazzy (`@jazzy`) and has no per-distribution input, so it cannot merge
+  Humble differences.
+- It passes no `--module` or `--extra-import`.
+- The target still needs one Swift file of its own. SwiftPM drops a target without sources
+  before the plugin runs.
+
+```swift
+.target(
+    name: "my_msgs",
+    dependencies: [
+        .product(name: "SwiftROS2CDR", package: "swift-ros2-rosidl"),
+        .product(name: "SwiftROS2Messages", package: "swift-ros2-rosidl"),
+    ],
+    exclude: ["msg"],  // the plugin reads msg/ itself
+    plugins: [.plugin(name: "SwiftROS2GenPlugin", package: "swift-ros2-rosidl")]),
+```
+
+For anything else (services, actions, references to other packages, Humble variants), run the
+CLI and commit its output.
 
 ## Upstream IDL and regeneration
 

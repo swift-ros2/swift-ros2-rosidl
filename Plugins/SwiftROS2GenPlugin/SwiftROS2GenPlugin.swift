@@ -31,7 +31,7 @@ struct SwiftROS2GenPlugin: BuildToolPlugin {
         // .srv / .action files exist but the plugin does not yet handle
         // their five-wrapper output naming. Surface them as a warning so
         // users are not silently surprised. Multi-output IDL goes through
-        // the CLI directly (see CLAUDE.md "Using the build plugin").
+        // the CLI directly (see the README section "The build plugin").
         let unsupported =
             Self.idlFiles(in: targetDir.appending(subpath: "srv"), extension: "srv")
             + Self.idlFiles(in: targetDir.appending(subpath: "action"), extension: "action")
@@ -39,7 +39,7 @@ struct SwiftROS2GenPlugin: BuildToolPlugin {
             Diagnostics.warning(
                 "SwiftROS2GenPlugin: ignoring \(unsupported.count) .srv/.action file(s) under "
                     + "\(target.name); these IDL kinds need the swift-ros2-gen CLI directly. "
-                    + "See CLAUDE.md."
+                    + "See the swift-ros2-rosidl README, section \"The build plugin\"."
             )
         }
 
