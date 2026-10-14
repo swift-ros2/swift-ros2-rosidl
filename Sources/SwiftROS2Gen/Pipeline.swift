@@ -273,9 +273,23 @@ extension Pipeline {
         }
     }
 
-    /// Everything `generateMulti` and `generateOracleSamples` need before emission.
+    /// One parsed message, service half or action part, with the distributions that have it.
+    struct CollectedIR {
+        let run: PackageRun
+        let ir: MessageIR
+        let sourceLabel: String
+        /// Stem of the IDL file the type comes from (`Fibonacci` for `Fibonacci_SendGoal_Request`),
+        /// which names the hash oracle's JSON file.
+        let topLevelTypeName: String
+        /// The distributions whose IDL has the type: the run's own distribution for a single run,
+        /// and for a package read from several distributions only those whose IDL has it.
+        let distros: Set<String>
+    }
+
+    /// Everything `generateMulti`, `generateOracleSamples` and `buildVerifyPlan` need before
+    /// emission.
     struct Collected {
-        var unresolvedIRs: [(run: PackageRun, ir: MessageIR, sourceLabel: String)]
+        var unresolvedIRs: [CollectedIR]
         var collectedServices: [ParsedService]
         var collectedActions: [ParsedAction]
         var registry: [String: MessageIR]
@@ -286,7 +300,7 @@ extension Pipeline {
     /// Parses every run, merges multi-distro packages, builds the registry and the Swift
     /// name overrides, and checks that every nested reference resolves.
     static func collect(_ runs: [PackageRun]) throws -> Collected {
-        var unresolvedIRs: [(run: PackageRun, ir: MessageIR, sourceLabel: String)] = []
+        var unresolvedIRs: [CollectedIR] = []
         var collectedServices: [ParsedService] = []
         var collectedActions: [ParsedAction] = []
         // Group runs by package name; multiple runs with the same name represent
@@ -301,124 +315,65 @@ extension Pipeline {
         let dependencyPackages = Set(runs.filter { !$0.emit }.map(\.input.name))
         for pkg in packageOrder {
             let pkgRuns = runsByPackage[pkg]!
+            // Labels and the run of every entry come from the first run of the package.
+            let primaryRun = pkgRuns[0]
             if pkgRuns.count == 1 {
                 // Single-distro fast path (Phase 1-3 behavior preserved).
-                let run = pkgRuns[0]
-                let parsed = try parsePackage(run: run)
-                for entry in parsed {
+                for entry in try parsePackage(run: primaryRun) {
                     unresolvedIRs.append(
-                        (run: run, ir: entry.ir, sourceLabel: entry.sourceLabel))
+                        CollectedIR(
+                            run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel,
+                            topLevelTypeName: entry.ir.typeName, distros: entry.distros))
                 }
-                let services = try parseServicesIn(run: run)
-                for svc in services {
-                    let reqIR = IRBuilder.build(jazzy: svc.requestIDL, kind: .srv)
-                    let resIR = IRBuilder.build(jazzy: svc.responseIDL, kind: .srv)
-                    let label = sourceLabelFor(run: run, typeName: svc.typeName, kind: .srv)
-                    unresolvedIRs.append((run: run, ir: reqIR, sourceLabel: label))
-                    unresolvedIRs.append((run: run, ir: resIR, sourceLabel: label))
-                }
-                collectedServices.append(contentsOf: services)
-
-                let actions = try parseActionsIn(run: run)
-                for act in actions {
-                    let label = sourceLabelFor(
-                        run: run, typeName: act.typeName, kind: .action)
-                    // Register the user-defined Goal/Result/Feedback IRs in
-                    // the registry so wrapper nested references resolve.
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.goal, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.result, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.feedback, sourceLabel: label))
-                    // Register the wrappers so the action-level hash and any
-                    // cross-package reference to a wrapper resolves.
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.sendGoalRequest, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.sendGoalResponse, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.getResultRequest, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.getResultResponse, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.feedbackMessage, sourceLabel: label))
-                }
-                collectedActions.append(contentsOf: actions)
             } else {
                 // Multi-distro path: parse each run's IDLs, group by type name,
                 // then merge per-distro IDLs via IRBuilder.build(perDistro:).
-                let merged = try parseAndMergeMultiDistroPackage(runs: pkgRuns)
-                let primaryRun = pkgRuns.first!
-                for entry in merged {
+                for entry in try parseAndMergeMultiDistroPackage(runs: pkgRuns) {
                     try validateModernAgreement(entry.ir)
                     unresolvedIRs.append(
-                        (run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel))
+                        CollectedIR(
+                            run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel,
+                            topLevelTypeName: entry.ir.typeName, distros: entry.distros))
                 }
-                // Union services across the multi-distro runs, requiring
-                // structural agreement. Multi-distro service merging is
-                // intentionally unsupported: a `.srv` whose request or
-                // response shape differs between distros is rejected here
-                // so we never silently emit one distro's shape.
-                var servicesByName: [String: ParsedService] = [:]
-                var serviceOrder: [String] = []
-                for run in pkgRuns {
-                    let runServices = try parseServicesIn(run: run)
-                    for svc in runServices {
-                        if let existing = servicesByName[svc.typeName] {
-                            guard
-                                existing.requestIDL == svc.requestIDL,
-                                existing.responseIDL == svc.responseIDL
-                            else {
-                                throw GeneratorError.parse(
-                                    ParseError(
-                                        file: "\(svc.package)/srv/\(svc.typeName).srv",
-                                        line: 1,
-                                        message:
-                                            "service '\(svc.typeName)' differs between distros — multi-distro service merging is not supported"
-                                    ))
-                            }
-                        } else {
-                            servicesByName[svc.typeName] = svc
-                            serviceOrder.append(svc.typeName)
-                        }
-                    }
-                }
-                let services = serviceOrder.compactMap { servicesByName[$0] }
-                for svc in services {
-                    let reqIR = IRBuilder.build(jazzy: svc.requestIDL, kind: .srv)
-                    let resIR = IRBuilder.build(jazzy: svc.responseIDL, kind: .srv)
-                    let label = sourceLabelFor(
-                        run: primaryRun, typeName: svc.typeName, kind: .srv)
-                    unresolvedIRs.append((run: primaryRun, ir: reqIR, sourceLabel: label))
-                    unresolvedIRs.append((run: primaryRun, ir: resIR, sourceLabel: label))
-                }
-                collectedServices.append(contentsOf: services)
-
-                // Same single-source-run policy for actions.
-                let actions = try parseActionsIn(run: primaryRun)
-                for act in actions {
-                    let label = sourceLabelFor(
-                        run: primaryRun, typeName: act.typeName, kind: .action)
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.goal, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.result, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.feedback, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.sendGoalRequest, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.sendGoalResponse, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.getResultRequest, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.getResultResponse, sourceLabel: label))
-                    unresolvedIRs.append(
-                        (run: primaryRun, ir: act.actionIR.feedbackMessage, sourceLabel: label))
-                }
-                collectedActions.append(contentsOf: actions)
             }
+            // Services and actions are the union across the package's runs, each with the
+            // distributions whose IDL has it. Multi-distro merging is intentionally unsupported
+            // for them: one whose shape differs between distros is rejected, so we never
+            // silently emit one distro's shape.
+            let services = try unionAcrossDistros(
+                pkgRuns, kind: .srv, parse: parseServicesIn, typeName: \.typeName)
+            for (svc, distros) in services {
+                let label = sourceLabelFor(run: primaryRun, typeName: svc.typeName, kind: .srv)
+                for half in [svc.requestIDL, svc.responseIDL] {
+                    unresolvedIRs.append(
+                        CollectedIR(
+                            run: primaryRun, ir: IRBuilder.build(jazzy: half, kind: .srv), sourceLabel: label,
+                            topLevelTypeName: svc.typeName, distros: distros))
+                }
+            }
+            collectedServices.append(contentsOf: services.map(\.item))
+
+            let actions = try unionAcrossDistros(
+                pkgRuns, kind: .action, parse: parseActionsIn, typeName: \.typeName)
+            for (act, distros) in actions {
+                let label = sourceLabelFor(run: primaryRun, typeName: act.typeName, kind: .action)
+                // The user-defined Goal/Result/Feedback IRs go in the registry so wrapper
+                // nested references resolve; the wrappers so the action-level hash and any
+                // cross-package reference to a wrapper resolves.
+                let parts = [
+                    act.actionIR.goal, act.actionIR.result, act.actionIR.feedback,
+                    act.actionIR.sendGoalRequest, act.actionIR.sendGoalResponse,
+                    act.actionIR.getResultRequest, act.actionIR.getResultResponse,
+                    act.actionIR.feedbackMessage,
+                ]
+                for ir in parts {
+                    unresolvedIRs.append(
+                        CollectedIR(
+                            run: primaryRun, ir: ir, sourceLabel: label, topLevelTypeName: act.typeName,
+                            distros: distros))
+                }
+            }
+            collectedActions.append(contentsOf: actions.map(\.item))
         }
         var registry: [String: MessageIR] = [:]
         for entry in unresolvedIRs {
@@ -440,6 +395,40 @@ extension Pipeline {
             unresolvedIRs: unresolvedIRs, collectedServices: collectedServices,
             collectedActions: collectedActions, registry: registry, nameOverrides: nameOverrides,
             dependencyPackages: dependencyPackages)
+    }
+
+    /// The services or actions of every run of one package, in first-seen order, each with the
+    /// distributions whose IDL has it. Throws when one differs between distributions.
+    private static func unionAcrossDistros<Item: Equatable>(
+        _ runs: [PackageRun],
+        kind: MessageKind,
+        parse: (PackageRun) throws -> [Item],
+        typeName: (Item) -> String
+    ) throws -> [(item: Item, distros: Set<String>)] {
+        var union: [(item: Item, distros: Set<String>)] = []
+        var indexByName: [String: Int] = [:]
+        for run in runs {
+            for item in try parse(run) {
+                let name = typeName(item)
+                guard let index = indexByName[name] else {
+                    indexByName[name] = union.count
+                    union.append((item, [run.input.distro]))
+                    continue
+                }
+                guard union[index].item == item else {
+                    let noun = kind == .srv ? "service" : "action"
+                    throw GeneratorError.parse(
+                        ParseError(
+                            file: "\(run.input.name)/\(kind.rawValue)/\(name).\(kind.rawValue)",
+                            line: 1,
+                            message:
+                                "\(noun) '\(name)' differs between distros — multi-distro \(noun) merging is not supported"
+                        ))
+                }
+                union[index].distros.insert(run.input.distro)
+            }
+        }
+        return union
     }
 
     /// Multi-package generation. All inputs are parsed first, then the resulting IRs
@@ -478,25 +467,9 @@ extension Pipeline {
                     "Pipeline: missing precomputed hash for \(entry.ir.rosTypeName)"
                 )
             }
-            // Determine which distros the IR was built against.
-            //   - Multi-distro IR (`IRBuilder.build(perDistro:)`):
-            //     `perDistroFieldPresence.keys` lists every contributing distro.
-            //   - Single-distro IR (`IRBuilder.build(jazzy:)` from the
-            //     fast path): the presence map is empty, so we fall back to
-            //     the run's distro. For a humble-only run that means the
-            //     emitted `typeInfo` advertises a `nil` humble hash.
-            //   - Service halves (`kind == .srv`): treated as supported on
-            //     every distro — cross-distro shape differences are rejected
-            //     during the service union above, so a `.srv` that reaches
-            //     this point is identical in every contributing distro.
-            let distros: Set<String>
-            if entry.ir.kind == .srv {
-                distros = Set(IRBuilder.distroOrder)
-            } else if entry.ir.perDistroFieldPresence.isEmpty {
-                distros = [entry.run.input.distro]
-            } else {
-                distros = Set(entry.ir.perDistroFieldPresence.keys)
-            }
+            // The distributions whose IDL has the type (see ``CollectedIR/distros``). For a
+            // humble-only type the emitted `typeInfo` advertises a `nil` humble hash.
+            let distros = entry.distros
             var perDistroHashes: [String: String?] = [:]
             for distro in distros {
                 if distro == "humble" {
@@ -621,6 +594,10 @@ extension Pipeline {
     /// `OracleSamples.swift` registry. Compiled into a repository's oracle corpus executable,
     /// never into a library product.
     ///
+    /// Each sample lists the distributions whose IDL has its type, and the registry lists every
+    /// distribution of the emitted runs, so `OracleSamples.samples(for:)` gives one
+    /// distribution's corpus: an oracle image fails on a type its distribution lacks.
+    ///
     /// A type of a dependency-only package gets an extension, in
     /// `OracleSamples_Dependencies.swift`, only when an emitted type reaches it through its
     /// fields (directly or through other dependency types), and never a sample of its own. The
@@ -633,7 +610,9 @@ extension Pipeline {
         let c = try collect(runs)
         var extensionsByFile: [String: [String]] = [:]
         var packagesByFile: [String: Set<String>] = [:]
-        var samples: [(rosName: String, swiftName: String)] = []
+        var samples: [(rosName: String, swiftName: String, distros: Set<String>)] = []
+        var distrosByRosName: [String: Set<String>] = [:]
+        for entry in c.unresolvedIRs { distrosByRosName[entry.ir.rosTypeName] = entry.distros }
         // Dependency message types by ROS name, and the ones an added type references.
         var dependencyIRs: [String: MessageIR] = [:]
         for entry in c.unresolvedIRs where c.dependencyPackages.contains(entry.ir.package) {
@@ -662,7 +641,7 @@ extension Pipeline {
             add(
                 entry.ir, swiftName: swiftName, file: "OracleSamples+\(pascal(entry.ir.package)).swift",
                 overrides: c.nameOverrides)
-            samples.append((entry.ir.rosTypeName, swiftName))
+            samples.append((entry.ir.rosTypeName, swiftName, entry.distros))
         }
         // Action Goal / Result / Feedback, named as SwiftEmitter.emit(_ ir: ActionIR…) names them.
         for act in c.collectedActions where !c.dependencyPackages.contains(act.package) {
@@ -672,11 +651,12 @@ extension Pipeline {
                 overrides["\(act.package)/action/\(act.typeName)_\(part)"] = "\(enumName).\(part)"
             }
             let file = "OracleSamples+\(pascal(act.package)).swift"
+            let distros = distrosByRosName[act.actionIR.goal.rosTypeName] ?? []
             for (part, ir) in [
                 ("Goal", act.actionIR.goal), ("Result", act.actionIR.result), ("Feedback", act.actionIR.feedback),
             ] {
                 add(ir, swiftName: "\(enumName).\(part)", file: file, overrides: overrides)
-                samples.append(("\(act.package)/action/\(act.typeName)_\(part)", "\(enumName).\(part)"))
+                samples.append(("\(act.package)/action/\(act.typeName)_\(part)", "\(enumName).\(part)", distros))
             }
         }
         // Dependency types the emitted types reach, transitively. They get an extension (nested
@@ -704,25 +684,49 @@ extension Pipeline {
             files.append(GeneratedFile(relativePath: file, contents: out))
         }
         let allPackages = packagesByFile.values.reduce(into: Set<String>()) { $0.formUnion($1) }
+        // Distributions as a Swift array literal, in `IRBuilder.distroOrder` order.
+        func literal(_ distros: Set<String>) -> String {
+            let known = IRBuilder.distroOrder.filter(distros.contains)
+            let ordered = known + distros.subtracting(known).sorted()
+            return "[" + ordered.map { "\"\($0)\"" }.joined(separator: ", ") + "]"
+        }
+        // Generated types give Rolling the modern hash of the newest named distribution.
+        let rollingStandIn = IRBuilder.distroOrder.last { $0 != "rolling" } ?? "rolling"
         var registry = header(packages: allPackages)
         registry += """
 
-            /// One CDR oracle sample: the ROS name, the CDR bytes Swift produces for it, and a
-            /// decode-then-encode of given bytes as the same type (the Swift round-trip).
+            /// One CDR oracle sample: the ROS name, the distributions whose IDL has the type, the
+            /// CDR bytes Swift produces for it, and a decode-then-encode of given bytes as the same
+            /// type (the Swift round-trip).
             struct OracleSample {
                 let rosName: String
+                let distributions: Set<String>
                 let encode: () throws -> Data
                 let reencode: (Data) throws -> Data
             }
 
-            /// Every sample of this run, in ROS-name order.
+            /// The samples of this run.
             enum OracleSamples {
+                /// Every distribution this run read IDL for.
+                static let distributions: Set<String> = \(literal(Set(runs.filter(\.emit).map(\.input.distro))))
+
+                /// The samples of the types `distro` has, or nil when this run read no IDL for
+                /// `distro`. Without Rolling IDL, Rolling has the \(rollingStandIn.capitalized) samples: generated types
+                /// give Rolling the modern (\(rollingStandIn.capitalized)) hash.
+                static func samples(for distro: String) -> [OracleSample]? {
+                    let source = distro == "rolling" && !distributions.contains("rolling") ? "\(rollingStandIn)" : distro
+                    guard distributions.contains(source) else { return nil }
+                    return all.filter { $0.distributions.contains(source) }
+                }
+
+                /// Every sample, in ROS-name order.
                 static let all: [OracleSample] = [
 
             """
         for sample in samples.sorted(by: { $0.rosName < $1.rosName }) {
             registry += "        OracleSample(\n"
             registry += "            rosName: \"\(sample.rosName)\",\n"
+            registry += "            distributions: \(literal(sample.distros)),\n"
             registry += "            encode: { try oracleEncode(\(sample.swiftName).oracleSample()) },\n"
             registry += "            reencode: { try oracleReencode(\(sample.swiftName).self, $0) }),\n"
         }
@@ -767,6 +771,8 @@ extension Pipeline {
     private struct ParsedEntry {
         let ir: MessageIR
         let sourceLabel: String
+        /// The distributions whose IDL has the type.
+        let distros: Set<String>
     }
 
     /// Throw ``GeneratorError/packageDirectoryMissing(_:)`` when `directory`
@@ -797,198 +803,25 @@ extension Pipeline {
         _ runs: [PackageRun],
         distros allowedDistros: Set<String>? = nil
     ) throws -> [VerifyPlanEntry] {
-        // Reuse the multi-package gather + register + hash sequence from
-        // generateMulti so cross-package nested references resolve. We
-        // collect one (run, ir, sourceLabel, topLevelTypeName) tuple per
-        // generated MessageIR; for actions, the topLevelTypeName is the
-        // outer .action stem rather than the contained sub-type's typeName.
-        var unresolvedIRs: [(run: PackageRun, ir: MessageIR, sourceLabel: String, topLevelTypeName: String)] = []
-        var collectedActions: [ParsedAction] = []
+        // Reuse the multi-package gather + register sequence of generateMulti so
+        // cross-package nested references resolve.
+        let c = try collect(runs)
 
-        var runsByPackage: [String: [PackageRun]] = [:]
-        var packageOrder: [String] = []
-        for run in runs.map(\.parseRun) {
-            if runsByPackage[run.input.name] == nil { packageOrder.append(run.input.name) }
-            runsByPackage[run.input.name, default: []].append(run)
-        }
-        try checkPackageRoles(runsByPackage)
-        let dependencyPackages = Set(runs.filter { !$0.emit }.map(\.input.name))
-        for pkg in packageOrder {
-            let pkgRuns = runsByPackage[pkg]!
-            if pkgRuns.count == 1 {
-                let run = pkgRuns[0]
-                let parsed = try parsePackage(run: run)
-                for entry in parsed {
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: entry.ir, sourceLabel: entry.sourceLabel,
-                            topLevelTypeName: entry.ir.typeName
-                        ))
-                }
-                let services = try parseServicesIn(run: run)
-                for svc in services {
-                    let reqIR = IRBuilder.build(jazzy: svc.requestIDL, kind: .srv)
-                    let resIR = IRBuilder.build(jazzy: svc.responseIDL, kind: .srv)
-                    let label = sourceLabelFor(run: run, typeName: svc.typeName, kind: .srv)
-                    unresolvedIRs.append(
-                        (run: run, ir: reqIR, sourceLabel: label, topLevelTypeName: svc.typeName))
-                    unresolvedIRs.append(
-                        (run: run, ir: resIR, sourceLabel: label, topLevelTypeName: svc.typeName))
-                }
-                let actions = try parseActionsIn(run: run)
-                for act in actions {
-                    let label = sourceLabelFor(run: run, typeName: act.typeName, kind: .action)
-                    let top = act.typeName
-                    unresolvedIRs.append(
-                        (run: run, ir: act.actionIR.goal, sourceLabel: label, topLevelTypeName: top))
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: act.actionIR.result, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: act.actionIR.feedback, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: act.actionIR.sendGoalRequest, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: act.actionIR.sendGoalResponse, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: act.actionIR.getResultRequest, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: act.actionIR.getResultResponse, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: run, ir: act.actionIR.feedbackMessage, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                }
-                collectedActions.append(contentsOf: actions)
-            } else {
-                let merged = try parseAndMergeMultiDistroPackage(runs: pkgRuns)
-                let primaryRun = pkgRuns.first!
-                for entry in merged {
-                    try validateModernAgreement(entry.ir)
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel,
-                            topLevelTypeName: entry.ir.typeName
-                        ))
-                }
-                let services = try parseServicesIn(run: primaryRun)
-                for svc in services {
-                    let reqIR = IRBuilder.build(jazzy: svc.requestIDL, kind: .srv)
-                    let resIR = IRBuilder.build(jazzy: svc.responseIDL, kind: .srv)
-                    let label = sourceLabelFor(
-                        run: primaryRun, typeName: svc.typeName, kind: .srv)
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: reqIR, sourceLabel: label,
-                            topLevelTypeName: svc.typeName
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: resIR, sourceLabel: label,
-                            topLevelTypeName: svc.typeName
-                        ))
-                }
-                let actions = try parseActionsIn(run: primaryRun)
-                for act in actions {
-                    let label = sourceLabelFor(
-                        run: primaryRun, typeName: act.typeName, kind: .action)
-                    let top = act.typeName
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.goal, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.result, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.feedback, sourceLabel: label,
-                            topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.sendGoalRequest,
-                            sourceLabel: label, topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.sendGoalResponse,
-                            sourceLabel: label, topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.getResultRequest,
-                            sourceLabel: label, topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.getResultResponse,
-                            sourceLabel: label, topLevelTypeName: top
-                        ))
-                    unresolvedIRs.append(
-                        (
-                            run: primaryRun, ir: act.actionIR.feedbackMessage,
-                            sourceLabel: label, topLevelTypeName: top
-                        ))
-                }
-                collectedActions.append(contentsOf: actions)
-            }
-        }
-        var registry: [String: MessageIR] = [:]
-        for entry in unresolvedIRs {
-            registry[entry.ir.rosTypeName] = entry.ir
-        }
-        try validateAllReferencesResolved(registry: registry)
-
-        // For each distro the caller asked about (default: every distro any
-        // IR was built against), compute the per-distro hash and emit one
-        // VerifyPlanEntry per (ir, distro) pair. Distros that are out of
-        // scope for an IR (e.g. Humble for a type that didn't exist on
-        // Humble, or an IR that was built jazzy-only) are skipped.
+        // For each distro the caller asked about (default: every distro whose IDL
+        // has the type), compute the per-distro hash and emit one VerifyPlanEntry
+        // per (ir, distro) pair. A type is in scope only for the distributions
+        // whose IDL has it (``CollectedIR/distros``): a single run's own
+        // distribution, or for a package read from several distributions the ones
+        // that have the message, service or action.
         var out: [VerifyPlanEntry] = []
-        for entry in unresolvedIRs {
-            // Determine the distros this IR is "in scope" for.
-            //   - Multi-distro merged IRs (Phase 4): one entry per distro
-            //     in `perDistroFieldPresence`.
-            //   - Single-distro IRs (Phase 1-3 messages, services,
-            //     actions): the per-distro presence map is empty, so we
-            //     fall back to the run's own `input.distro`. Hard-coding
-            //     `"jazzy"` here would make `--input ...@kilted` (or
-            //     `@rolling`) silently produce zero verify entries.
-            let scopedDistros: [String]
-            if entry.ir.perDistroFieldPresence.isEmpty {
-                scopedDistros = [entry.run.input.distro]
-            } else {
-                scopedDistros = Array(entry.ir.perDistroFieldPresence.keys).sorted()
-            }
-            for distro in scopedDistros {
+        for entry in c.unresolvedIRs {
+            for distro in entry.distros.sorted() {
                 if let allow = allowedDistros, !allow.contains(distro) { continue }
                 // Humble does not have a hash oracle; rosidl pre-RIHS01.
                 // Skip silently to keep the verify-mode focused on the
                 // distros the rosidl `.json` files actually exist for.
                 if distro == "humble" { continue }
-                let hash = RIHS01.hash(entry.ir, for: distro, registry: registry)
+                let hash = RIHS01.hash(entry.ir, for: distro, registry: c.registry)
                 out.append(
                     VerifyPlanEntry(
                         package: entry.ir.package,
@@ -1009,8 +842,7 @@ extension Pipeline {
         // wrapper / block hashes (which carry the wire format) are
         // verified above; the action-level hash drift is tracked as a
         // separate generator follow-up.
-        _ = collectedActions
-        out.removeAll { dependencyPackages.contains($0.package) }
+        out.removeAll { c.dependencyPackages.contains($0.package) }
         return out
     }
 }
@@ -1088,7 +920,7 @@ extension Pipeline {
                     typeName: typeName
                 )
                 let ir = IRBuilder.build(jazzy: idl)
-                parsed.append(ParsedEntry(ir: ir, sourceLabel: label))
+                parsed.append(ParsedEntry(ir: ir, sourceLabel: label, distros: [run.input.distro]))
             } catch let err as ParseError {
                 throw GeneratorError.parse(err)
             }
@@ -1278,7 +1110,7 @@ extension Pipeline {
                 return parentDir
             }()
             let label = "\(baseParent)-\(distros)/\(packageName)/msg/\(typeName).msg"
-            parsed.append(ParsedEntry(ir: mergedIR, sourceLabel: label))
+            parsed.append(ParsedEntry(ir: mergedIR, sourceLabel: label, distros: Set(perDistroIDL.keys)))
         }
         return parsed
     }
