@@ -163,7 +163,7 @@ struct SwiftROS2GenCommand: ParsableCommand {
                 ))
         }
         for raw in dependency {
-            let pkg = try parseInput(raw)
+            let pkg = try parseInput(raw, option: "--dependency")
             runs.append(
                 .init(
                     input: PackageInput(name: pkg.packageName, directory: pkg.directory, distro: pkg.distro),
@@ -229,7 +229,7 @@ struct SwiftROS2GenCommand: ParsableCommand {
                 ))
         }
         for raw in dependency {
-            let pkg = try parseInput(raw)
+            let pkg = try parseInput(raw, option: "--dependency")
             runs.append(
                 .init(
                     input: PackageInput(name: pkg.packageName, directory: pkg.directory, distro: pkg.distro),
@@ -293,20 +293,12 @@ struct SwiftROS2GenCommand: ParsableCommand {
         let distro: String
     }
 
-    func parseInput(_ raw: String) throws -> ParsedInput {
-        // Format: <package>=<path>@<distro>
-        let eqParts = raw.split(separator: "=", maxSplits: 1).map(String.init)
-        guard eqParts.count == 2 else {
-            throw ValidationError("malformed --input '\(raw)' (expected '<package>=<path>@<distro>')")
+    func parseInput(_ raw: String, option: String = "--input") throws -> ParsedInput {
+        do {
+            let parsed = try PackageInput.parse(raw, option: option)
+            return ParsedInput(packageName: parsed.name, directory: parsed.directory, distro: parsed.distro)
+        } catch let error as PackageInputFormatError {
+            throw ValidationError(error.description)
         }
-        let atParts = eqParts[1].split(separator: "@", maxSplits: 1).map(String.init)
-        guard atParts.count == 2 else {
-            throw ValidationError("malformed --input '\(raw)' (missing '@<distro>')")
-        }
-        return ParsedInput(
-            packageName: eqParts[0],
-            directory: URL(fileURLWithPath: atParts[0], isDirectory: true),
-            distro: atParts[1]
-        )
     }
 }

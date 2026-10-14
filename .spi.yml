@@ -1,4 +1,11 @@
 version: 1
 builder:
   configs:
-    - documentation_targets: [SwiftROS2Messages, SwiftROS2CDR, SwiftROS2Gen]
+    - documentation_targets:
+        - SwiftROS2Messages
+        - SwiftROS2CDR
+        - SwiftROS2Gen
+        - BuiltinInterfaces
+        - UniqueIdentifierMsgs
+        - ActionMsgs
+        - RclInterfaces

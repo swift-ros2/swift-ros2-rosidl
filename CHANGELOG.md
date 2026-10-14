@@ -12,7 +12,6 @@
 - Generated files import the modules of the packages they reference (derived imports).
 - Distro-safe `typeInfo(for:)`: Humble gets the legacy schema and every later distribution the modern hash; a field that differs among modern distributions stops generation.
 - ROS names equal to a Swift standard-library type get a `Msg` suffix, now including `DurationMsg`, `RangeMsg` and `ClockMsg`.
-- Removed the RCL emitters from the generator.
 - The generator emits CDR oracle samples, and a Swift round-trip check verifies them.
 - Upstream IDL is pinned in `idl.lock` and fetched by `Scripts/fetch-idl.sh` into a gitignored cache (no submodules); generated Swift is committed.
 - Reusable `interface-oracles.yml` workflow for hash and CDR oracles in interface repositories, with an `apt-packages` input.

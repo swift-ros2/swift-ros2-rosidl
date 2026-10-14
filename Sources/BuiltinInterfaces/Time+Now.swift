@@ -1,6 +1,6 @@
 // Source-compat aliases for callers that pre-date the swift-ros2-gen migration.
-// These keep the long names alive so that downstream consumers (and the action /
-// service plumbing inside this repo) compile without a churn-only rename PR.
+// These keep the long names alive so that downstream consumers compile without a
+// churn-only rename.
 // New code should use the bare generated name (`Time`).
 
 import Foundation
