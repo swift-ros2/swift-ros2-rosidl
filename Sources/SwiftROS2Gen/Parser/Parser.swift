@@ -325,7 +325,7 @@ public enum Parser {
             }
             let baseToken = String(token[..<openIdx])
             let inside = String(token[token.index(after: openIdx)..<closeIdx])
-            let element = try parseScalarTypeToken(baseToken, file: file, line: line)
+            let element = try parseElementTypeToken(baseToken, file: file, line: line)
             if inside.isEmpty {
                 return .sequence(element: element, upperBound: nil)
             }
@@ -349,28 +349,42 @@ public enum Parser {
             }
             return .array(element: element, length: n)
         }
-        if let leqRange = token.range(of: "<=") {
-            let head = String(token[..<leqRange.lowerBound])
-            let tail = String(token[leqRange.upperBound...])
-            guard let n = Int(tail), n > 0 else {
-                throw ParseError(
-                    file: file,
-                    line: line,
-                    message: "invalid bounded-string size in '\(token)'"
-                )
-            }
-            switch head {
-            case "string": return .boundedString(isWide: false, upperBound: n)
-            case "wstring": return .boundedString(isWide: true, upperBound: n)
-            default:
-                throw ParseError(
-                    file: file,
-                    line: line,
-                    message: "'<=' suffix only valid on string/wstring; got '\(head)'"
-                )
-            }
+        return try parseElementTypeToken(token, file: file, line: line)
+    }
+
+    /// Resolve a type token without an array or sequence suffix: a scalar, or a bounded string
+    /// (`string<=N`, also the element of `string<=N[]`).
+    static func parseElementTypeToken(_ token: String, file: String, line: Int) throws -> IDLFieldType {
+        if token.contains("<=") {
+            return try parseBoundedStringToken(token, file: file, line: line)
         }
         return try parseScalarTypeToken(token, file: file, line: line)
+    }
+
+    /// Resolve `string<=N` / `wstring<=N`.
+    static func parseBoundedStringToken(_ token: String, file: String, line: Int) throws -> IDLFieldType {
+        guard let leqRange = token.range(of: "<=") else {
+            preconditionFailure("parseBoundedStringToken needs a '<=' in '\(token)'")
+        }
+        let head = String(token[..<leqRange.lowerBound])
+        let tail = String(token[leqRange.upperBound...])
+        guard let n = Int(tail), n > 0 else {
+            throw ParseError(
+                file: file,
+                line: line,
+                message: "invalid bounded-string size in '\(token)'"
+            )
+        }
+        switch head {
+        case "string": return .boundedString(isWide: false, upperBound: n)
+        case "wstring": return .boundedString(isWide: true, upperBound: n)
+        default:
+            throw ParseError(
+                file: file,
+                line: line,
+                message: "'<=' suffix only valid on string/wstring; got '\(head)'"
+            )
+        }
     }
 
     /// Resolve a non-decorated scalar type token into a primitive or nested ref.
