@@ -251,7 +251,7 @@ extension Pipeline {
             let services = try unionAcrossDistros(
                 pkgRuns, kind: .srv, parse: parseServicesIn, typeName: \.typeName)
             for (svc, distros) in services {
-                let label = sourceLabelFor(run: primaryRun, typeName: svc.typeName, kind: .srv)
+                let label = sourceLabel(package: svc.package, typeName: svc.typeName, kind: .srv)
                 for half in [svc.requestIDL, svc.responseIDL] {
                     let ir = try buildIR(file: label) { try IRBuilder.build(jazzy: half, kind: .srv) }
                     unresolvedIRs.append(
@@ -265,7 +265,7 @@ extension Pipeline {
             let actions = try unionAcrossDistros(
                 pkgRuns, kind: .action, parse: parseActionsIn, typeName: \.typeName)
             for (act, distros) in actions {
-                let label = sourceLabelFor(run: primaryRun, typeName: act.typeName, kind: .action)
+                let label = sourceLabel(package: act.package, typeName: act.typeName, kind: .action)
                 // The user-defined Goal/Result/Feedback IRs go in the registry so wrapper
                 // nested references resolve; the wrappers so the action-level hash and any
                 // cross-package reference to a wrapper resolves.
@@ -469,7 +469,7 @@ extension Pipeline {
                 requestHash: requestHash,
                 responseHash: responseHash,
                 serviceHash: serviceHash,
-                sourceLabel: "\(svc.package)/srv/\(svc.typeName).srv",
+                sourceLabel: sourceLabel(package: svc.package, typeName: svc.typeName, kind: .srv),
                 moduleNames: moduleNames
             )
             let pascalPackage = pascal(svc.package)
@@ -489,10 +489,9 @@ extension Pipeline {
             var actionIR = act.actionIR
             IRBuilder.populateActionHashes(
                 &actionIR, distro: "jazzy", extraRegistry: c.registry)
-            let label = "\(act.package)/action/\(act.typeName).action"
             let swift = SwiftEmitter.emit(
                 actionIR,
-                sourceLabel: label,
+                sourceLabel: sourceLabel(package: act.package, typeName: act.typeName, kind: .action),
                 nestedNameOverrides: c.nameOverrides,
                 moduleNames: moduleNames
             )
@@ -692,17 +691,48 @@ extension Pipeline {
         let distros: Set<String>
     }
 
-    /// Throw ``GeneratorError/packageDirectoryMissing(_:)`` when `directory`
-    /// does not exist or is not a directory. Used by every `--input` consumer
-    /// before tolerating a missing `msg/` or `srv/` subdirectory, so a typo'd
-    /// `--input` path surfaces as a hard error rather than as an empty
-    /// (single-package path) or partial (multi-distro path) success.
-    private static func requirePackageDirectory(_ directory: URL) throws {
+    /// One IDL file of a package: the type it defines (the file stem), its location and its text.
+    private struct IDLSource {
+        let typeName: String
+        let url: URL
+        let contents: String
+    }
+
+    /// The `msg/*.msg`, `srv/*.srv` or `action/*.action` files (by `kind`) of the package of
+    /// `run` whose type name passes `allowList`, sorted by file name. A package without that
+    /// subdirectory has none, since a package may ship only messages, services or actions. A
+    /// missing package directory throws ``GeneratorError/packageDirectoryMissing(_:)``, so a
+    /// typo'd `--input` path is never read as an empty package.
+    private static func idlSources(
+        of run: PackageRun, kind: MessageKind, allowList: Set<String>?
+    ) throws -> [IDLSource] {
         var isDir: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDir)
-        guard exists, isDir.boolValue else {
-            throw GeneratorError.packageDirectoryMissing(directory)
+        let packageDirectory = run.input.directory
+        guard FileManager.default.fileExists(atPath: packageDirectory.path, isDirectory: &isDir), isDir.boolValue
+        else {
+            throw GeneratorError.packageDirectoryMissing(packageDirectory)
         }
+        let directory = packageDirectory.appendingPathComponent(kind.rawValue, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+        return try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension == kind.rawValue }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        .compactMap { url in
+            let typeName = url.deletingPathExtension().lastPathComponent
+            if let allowList, !allowList.contains(typeName) { return nil }
+            return IDLSource(typeName: typeName, url: url, contents: try String(contentsOf: url, encoding: .utf8))
+        }
+    }
+
+    /// The `// Source:` label of a generated file, `<package>/<kind>/<Type>.<kind>`. It is the same
+    /// for messages, services and actions, and does not depend on the directory the IDL was read
+    /// from or on the distributions it was read for.
+    static func sourceLabel(package: String, typeName: String, kind: MessageKind) -> String {
+        "\(package)/\(kind.rawValue)/\(typeName).\(kind.rawValue)"
     }
 
     /// Same parse-and-IR walk as ``generateMulti`` but stops short of
@@ -826,139 +856,48 @@ public struct VerifyPlanEntry: Sendable, Equatable {
 }
 
 extension Pipeline {
+    /// Parses the `.msg` files of one run. Parse errors name the file's path.
     private static func parsePackage(run: PackageRun) throws -> [ParsedEntry] {
-        // Reject typo'd / nonexistent package directories up-front so the
-        // srv-only tolerance below cannot mask a bad `--input` path.
-        try requirePackageDirectory(run.input.directory)
-        let msgDir = run.input.directory.appendingPathComponent("msg", isDirectory: true)
-        var isDir: ObjCBool = false
-        let msgExists =
-            FileManager.default.fileExists(atPath: msgDir.path, isDirectory: &isDir)
-            && isDir.boolValue
-        guard msgExists else {
-            // A package without a msg/ directory is valid when it ships only
-            // services (e.g. std_srvs) or actions. Return empty here; the
-            // caller still walks srv/ via parseServicesIn.
-            return []
-        }
-        let entries = try FileManager.default.contentsOfDirectory(
-            at: msgDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        let msgFiles =
-            entries
-            .filter { $0.pathExtension == "msg" }
-            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-        var parsed: [ParsedEntry] = []
-        for fileURL in msgFiles {
-            let typeName = fileURL.deletingPathExtension().lastPathComponent
-            if let allow = run.typesAllowList, !allow.contains(typeName) { continue }
-            let contents = try String(contentsOf: fileURL, encoding: .utf8)
-            let label = sourceLabelFor(run: run, typeName: typeName, kind: .msg)
-            do {
-                let idl = try Parser.parseMessage(
-                    source: contents,
-                    file: label,
-                    package: run.input.name,
-                    typeName: typeName
-                )
-                let ir = try buildIR(file: label) { try IRBuilder.build(jazzy: idl) }
-                parsed.append(ParsedEntry(ir: ir, sourceLabel: label, distros: [run.input.distro]))
-            } catch let err as ParseError {
-                throw GeneratorError.parse(err)
+        try idlSources(of: run, kind: .msg, allowList: run.typesAllowList).map { source in
+            let idl = try parse {
+                try Parser.parseMessage(
+                    source: source.contents, file: source.url.path, package: run.input.name,
+                    typeName: source.typeName)
             }
+            return ParsedEntry(
+                ir: try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) },
+                sourceLabel: sourceLabel(package: run.input.name, typeName: source.typeName, kind: .msg),
+                distros: [run.input.distro])
         }
-        return parsed
     }
 
-    /// Produce a stable `// Source:` label for emitted Swift files. The label
-    /// is informational only (it never affects the wire format), but tests
-    /// and goldens key on it. We prefix with the parent vendor directory
-    /// (`common_interfaces-jazzy`, etc.) when that name unambiguously
-    /// identifies the upstream IDL source; bare names like `vendor` or
-    /// repository roots that happen to be the immediate parent are stripped.
-    private static func sourceLabelFor(
-        run: PackageRun,
-        typeName: String,
-        kind: MessageKind
-    ) -> String {
-        let parent = run.input.directory.deletingLastPathComponent().lastPathComponent
-        let suffix = "\(run.input.name)/\(kind.rawValue)/\(typeName).\(kind.rawValue)"
-        if parent.isEmpty || parent == "vendor" || parent == "Vendor" {
-            return suffix
+    /// Runs a parser call, reporting a ``ParseError`` as ``GeneratorError/parse(_:)``.
+    private static func parse<T>(_ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch let error as ParseError {
+            throw GeneratorError.parse(error)
         }
-        // Strip a `<repo>-<distro>` parent down to its base when the package
-        // is not the canonical sibling of that repo (e.g. action_msgs lives
-        // under `rcl_interfaces-jazzy/`, but the historical labels emitted
-        // it bare). The rule: keep the parent only when it begins with
-        // `common_interfaces` (the one repo where the prefixed label was
-        // historically committed).
-        if parent.hasPrefix("common_interfaces") {
-            return "\(parent)/\(suffix)"
-        }
-        return suffix
     }
 
-    /// Enumerate `<pkg>/srv/*.srv` for the run, parse each into request / response
-    /// halves, and return them as ``ParsedService`` carriers. Returns an empty
-    /// array when the package has no `srv/` subdirectory at all (the common case
-    /// for pure message packages like `std_msgs`). The same `typesAllowList`
-    /// filter applies as for messages — it matches the bare service name
-    /// (`CancelGoal`).
+    /// Parses the `.srv` files of one run into request / response halves, as ``ParsedService``
+    /// carriers. The type allow-list matches the bare service name (`CancelGoal`).
     private static func parseServicesIn(run: PackageRun) throws -> [ParsedService] {
-        // Same guard as parsePackage: a missing package directory must surface
-        // as a hard error rather than as an empty service list.
-        try requirePackageDirectory(run.input.directory)
-        let srvDir = run.input.directory.appendingPathComponent("srv", isDirectory: true)
-        var isDir: ObjCBool = false
-        guard
-            FileManager.default.fileExists(atPath: srvDir.path, isDirectory: &isDir),
-            isDir.boolValue
-        else {
-            return []
-        }
-        let entries = try FileManager.default.contentsOfDirectory(
-            at: srvDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        let srvFiles =
-            entries
-            .filter { $0.pathExtension == "srv" }
-            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-        var out: [ParsedService] = []
-        for fileURL in srvFiles {
-            let typeName = fileURL.deletingPathExtension().lastPathComponent
-            if let allow = run.typesAllowList, !allow.contains(typeName) { continue }
-            let contents = try String(contentsOf: fileURL, encoding: .utf8)
-            let label = sourceLabelFor(run: run, typeName: typeName, kind: .srv)
-            do {
-                let svc = try Parser.parseService(
-                    source: contents,
-                    file: label,
-                    package: run.input.name,
-                    typeName: typeName
-                )
-                out.append(
-                    ParsedService(
-                        package: run.input.name,
-                        typeName: typeName,
-                        requestIDL: svc.request,
-                        responseIDL: svc.response
-                    ))
-            } catch let err as ParseError {
-                throw GeneratorError.parse(err)
+        try idlSources(of: run, kind: .srv, allowList: run.typesAllowList).map { source in
+            let svc = try parse {
+                try Parser.parseService(
+                    source: source.contents, file: source.url.path, package: run.input.name,
+                    typeName: source.typeName)
             }
+            return ParsedService(
+                package: run.input.name, typeName: source.typeName, requestIDL: svc.request,
+                responseIDL: svc.response)
         }
-        return out
     }
 
-    /// Phase 4 helper. Parses every `.msg` in each `pkgRuns[*].input.directory/msg`
-    /// and groups the IDLFiles by type name; for each group, calls
-    /// ``IRBuilder/build(perDistro:)`` to produce a single distro-conditional IR.
-    /// `pkgRuns` must all share the same `input.name` — the caller in
-    /// ``generateMulti`` already enforces that.
+    /// Parses the `.msg` files of every run of one package (one run per distribution) and merges
+    /// the per-distribution IDL of each type with ``IRBuilder/build(perDistro:)`` into one
+    /// distro-conditional IR. `pkgRuns` all share one package name; ``collect(_:)`` groups them.
     private static func parseAndMergeMultiDistroPackage(
         runs pkgRuns: [PackageRun]
     ) throws -> [ParsedEntry] {
@@ -968,98 +907,40 @@ extension Pipeline {
             pkgRuns.allSatisfy { $0.input.name == packageName },
             "parseAndMergeMultiDistroPackage: all runs must share the same package name")
 
-        // Per-distro IDL collections, indexed by type name.
-        var idlsByType: [String: [String: IDLFile]] = [:]
-        var typeOrder: [String] = []
-        // Pick the most-permissive type allow-list across the runs (a type
-        // appears in the merge if any run lists it). Practically every run
-        // shares the same allow-list because the CLI applies the same
-        // `--types` filter to every input.
+        // A type takes part in the merge when any run's allow-list has it. The CLI gives every
+        // run the same `--types` filter.
         var unifiedAllowList: Set<String>? = nil
         for run in pkgRuns {
             if let allow = run.typesAllowList {
-                if unifiedAllowList == nil { unifiedAllowList = [] }
-                unifiedAllowList?.formUnion(allow)
+                unifiedAllowList = (unifiedAllowList ?? []).union(allow)
             }
         }
 
+        // Per-distro IDL of each type, and the types in first-seen order.
+        var idlsByType: [String: [String: IDLFile]] = [:]
+        var typeOrder: [String] = []
         for run in pkgRuns {
-            // Validate the per-distro `--input` path before falling through to
-            // the msg/ tolerance: a typo'd directory must not be silently
-            // skipped (which would yield a partial multi-distro merge with no
-            // diagnostics), only the absence of the `msg/` subdirectory inside
-            // an otherwise-valid package directory is tolerated.
-            try requirePackageDirectory(run.input.directory)
-            let msgDir = run.input.directory.appendingPathComponent("msg", isDirectory: true)
-            var isDir: ObjCBool = false
-            let msgExists =
-                FileManager.default.fileExists(atPath: msgDir.path, isDirectory: &isDir)
-                && isDir.boolValue
-            guard msgExists else {
-                // Service-only packages (no msg/ directory) are tolerated;
-                // the multi-distro path simply contributes no message IRs
-                // for that distro.
-                continue
-            }
-            let entries = try FileManager.default.contentsOfDirectory(
-                at: msgDir,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            )
-            let msgFiles =
-                entries
-                .filter { $0.pathExtension == "msg" }
-                .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-            for fileURL in msgFiles {
-                let typeName = fileURL.deletingPathExtension().lastPathComponent
-                if let allow = unifiedAllowList, !allow.contains(typeName) { continue }
-                let contents = try String(contentsOf: fileURL, encoding: .utf8)
-                // Derive the parent name from the actual filesystem directory
-                // (the `<idl-root>` in `<idl-root>/std_msgs/msg/Header.msg`) so a
-                // renamed IDL root is reflected in the label.
-                let parentDir = run.input.directory.deletingLastPathComponent().lastPathComponent
-                let label = "\(parentDir)/\(packageName)/msg/\(typeName).msg"
-                do {
-                    let idl = try Parser.parseMessage(
-                        source: contents,
-                        file: label,
-                        package: packageName,
-                        typeName: typeName
-                    )
-                    // Validate each distribution's defaults and constants against its own file,
-                    // so an error names the file and line it comes from.
-                    _ = try buildIR(file: label) { try IRBuilder.build(jazzy: idl) }
-                    if idlsByType[typeName] == nil { typeOrder.append(typeName) }
-                    idlsByType[typeName, default: [:]][run.input.distro] = idl
-                } catch let err as ParseError {
-                    throw GeneratorError.parse(err)
+            for source in try idlSources(of: run, kind: .msg, allowList: unifiedAllowList) {
+                let idl = try parse {
+                    try Parser.parseMessage(
+                        source: source.contents, file: source.url.path, package: packageName,
+                        typeName: source.typeName)
                 }
+                // Validate each distribution's defaults and constants against its own file,
+                // so an error names the file and line it comes from.
+                _ = try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) }
+                if idlsByType[source.typeName] == nil { typeOrder.append(source.typeName) }
+                idlsByType[source.typeName, default: [:]][run.input.distro] = idl
             }
         }
 
-        var parsed: [ParsedEntry] = []
-        for typeName in typeOrder {
-            guard let perDistroIDL = idlsByType[typeName] else { continue }
-            let mergedIR = try IRBuilder.build(perDistro: perDistroIDL)
-            // Use a stable label that names every distro the type came from.
-            // The parent comes from the first run's vendor parent directory
-            // ("common_interfaces" or similar) plus a `+`-joined distro list.
-            let distros =
-                perDistroIDL.keys.sorted().joined(separator: "+")
-            let parentDir =
-                pkgRuns.first!.input.directory.deletingLastPathComponent().lastPathComponent
-            // Strip any trailing `-<distro>` suffix from the parent so the
-            // label reads e.g. `common_interfaces-humble+jazzy/sensor_msgs/...`.
-            let baseParent: String = {
-                if let dashIdx = parentDir.firstIndex(of: "-") {
-                    return String(parentDir[..<dashIdx])
-                }
-                return parentDir
-            }()
-            let label = "\(baseParent)-\(distros)/\(packageName)/msg/\(typeName).msg"
-            parsed.append(ParsedEntry(ir: mergedIR, sourceLabel: label, distros: Set(perDistroIDL.keys)))
+        return try typeOrder.map { typeName in
+            let perDistroIDL = idlsByType[typeName]!
+            return ParsedEntry(
+                ir: try IRBuilder.build(perDistro: perDistroIDL),
+                sourceLabel: sourceLabel(package: packageName, typeName: typeName, kind: .msg),
+                distros: Set(perDistroIDL.keys))
         }
-        return parsed
     }
 
     private static func validateAllReferencesResolved(registry: [String: MessageIR]) throws {
@@ -1113,55 +994,20 @@ extension Pipeline {
         }
     }
 
-    /// Enumerate `<pkg>/action/*.action` for the run, parse each into the
-    /// three user-defined blocks + five synthesized wrappers via
-    /// `IRBuilder.build(jazzy:)`, and return them as ``ParsedAction``
-    /// carriers. Returns an empty array when the package has no `action/`
-    /// subdirectory at all (the common case for pure message / service
-    /// packages). The same `typesAllowList` filter applies as for messages —
-    /// it matches the bare action type name (`Fibonacci`).
+    /// Parses the `.action` files of one run into the three user-defined blocks and the five
+    /// synthesized wrappers, as ``ParsedAction`` carriers. A package without an `action/`
+    /// directory has none; a missing package directory throws
+    /// ``GeneratorError/packageDirectoryMissing(_:)``. The type allow-list matches the bare
+    /// action name (`Fibonacci`).
     public static func parseActionsIn(run: PackageRun) throws -> [ParsedAction] {
-        let actionDir = run.input.directory.appendingPathComponent("action", isDirectory: true)
-        var isDir: ObjCBool = false
-        guard
-            FileManager.default.fileExists(atPath: actionDir.path, isDirectory: &isDir),
-            isDir.boolValue
-        else {
-            return []
-        }
-        let entries = try FileManager.default.contentsOfDirectory(
-            at: actionDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        let actionFiles =
-            entries
-            .filter { $0.pathExtension == "action" }
-            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-        var out: [ParsedAction] = []
-        for fileURL in actionFiles {
-            let typeName = fileURL.deletingPathExtension().lastPathComponent
-            if let allow = run.typesAllowList, !allow.contains(typeName) { continue }
-            let contents = try String(contentsOf: fileURL, encoding: .utf8)
-            let label = sourceLabelFor(run: run, typeName: typeName, kind: .action)
-            do {
-                let idl = try Parser.parseAction(
-                    source: contents,
-                    file: label,
-                    package: run.input.name,
-                    typeName: typeName
-                )
-                let ir = try buildIR(file: label) { try IRBuilder.build(jazzy: idl) }
-                out.append(
-                    ParsedAction(
-                        package: run.input.name,
-                        typeName: typeName,
-                        actionIR: ir
-                    ))
-            } catch let err as ParseError {
-                throw GeneratorError.parse(err)
+        try idlSources(of: run, kind: .action, allowList: run.typesAllowList).map { source in
+            let idl = try parse {
+                try Parser.parseAction(
+                    source: source.contents, file: source.url.path, package: run.input.name,
+                    typeName: source.typeName)
             }
+            let ir = try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) }
+            return ParsedAction(package: run.input.name, typeName: source.typeName, actionIR: ir)
         }
-        return out
     }
 }
