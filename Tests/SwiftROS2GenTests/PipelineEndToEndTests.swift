@@ -5,13 +5,12 @@ import Testing
 
 @Suite("Pipeline end-to-end")
 struct PipelineEndToEndTests {
-    @Test("Phase 1: single primitive-only package")
+    @Test("single primitive-only package")
     func generatesAllStdMsgsPrimitives() throws {
         let fixtureURL = try #require(
             Bundle.module.url(
                 forResource: "std_msgs_primitives", withExtension: nil, subdirectory: "Resources/IDL"))
-        let files = try Pipeline.generate(
-            for: PackageInput(name: "std_msgs", directory: fixtureURL))
+        let files = try Pipeline.generateMulti([.init(input: PackageInput(name: "std_msgs", directory: fixtureURL))])
         let names = Set(files.map(\.relativePath))
         #expect(
             names
@@ -21,7 +20,20 @@ struct PipelineEndToEndTests {
                 ]))
     }
 
-    @Test("Phase 2: three-package run resolves cross-package references")
+    @Test("a package of primitive-only messages imports only SwiftROS2CDR and SwiftROS2Messages")
+    func primitiveOnlyImports() throws {
+        let fixtureURL = try #require(
+            Bundle.module.url(
+                forResource: "std_msgs_primitives", withExtension: nil, subdirectory: "Resources/IDL"))
+        let files = try Pipeline.generateMulti([.init(input: PackageInput(name: "std_msgs", directory: fixtureURL))])
+        #expect(!files.isEmpty)
+        for file in files {
+            let imports = file.contents.split(separator: "\n").filter { $0.hasPrefix("import ") }
+            #expect(imports == ["import SwiftROS2CDR", "import SwiftROS2Messages"], "\(file.relativePath)")
+        }
+    }
+
+    @Test("three-package run resolves cross-package references")
     func generatesGeometryPlusBuiltinPlusHeader() throws {
         let bi = try #require(
             Bundle.module.url(

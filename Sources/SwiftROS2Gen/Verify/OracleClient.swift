@@ -24,23 +24,11 @@ public struct OracleClient: Sendable {
 
     /// Parsed contents of a single rosidl `<TopLevelType>.json` file.
     public struct Entry: Sendable {
-        public let package: String  // "example_interfaces"
-        public let kind: MessageKind  // .msg / .srv / .action
-        public let topLevelTypeName: String  // "Fibonacci"
         public let canonicalJSON: String  // raw bytes of `<TopLevelType>.json`
         /// `type_name` -> `RIHS01_<sha256>` for every entry in `type_hashes`.
         public let hashesByROSTypeName: [String: String]
 
-        public init(
-            package: String,
-            kind: MessageKind,
-            topLevelTypeName: String,
-            canonicalJSON: String,
-            hashesByROSTypeName: [String: String]
-        ) {
-            self.package = package
-            self.kind = kind
-            self.topLevelTypeName = topLevelTypeName
+        public init(canonicalJSON: String, hashesByROSTypeName: [String: String]) {
             self.canonicalJSON = canonicalJSON
             self.hashesByROSTypeName = hashesByROSTypeName
         }
@@ -58,13 +46,7 @@ public struct OracleClient: Sendable {
             "/opt/ros/\(distro)/share/\(package)/\(kind.rawValue)/\(topLevelTypeName).json"
         let raw = try runDocker(arguments: ["cat", path])
         let hashes = try Self.extractHashes(from: raw, source: path)
-        return Entry(
-            package: package,
-            kind: kind,
-            topLevelTypeName: topLevelTypeName,
-            canonicalJSON: raw,
-            hashesByROSTypeName: hashes
-        )
+        return Entry(canonicalJSON: raw, hashesByROSTypeName: hashes)
     }
 
     public enum OracleError: Error, CustomStringConvertible {

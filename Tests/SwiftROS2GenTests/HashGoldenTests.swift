@@ -45,7 +45,7 @@ struct HashGoldenTests {
             fields = []
         }
         let ir = MessageIR(package: "std_msgs", typeName: entry.typeName, fields: fields)
-        let hash = RIHS01.hash(ir)
+        let hash = RIHS01.hash(ir, registry: [:])
         #expect(hash == entry.hash, "for std_msgs/\(entry.typeName)")
     }
 }
@@ -296,7 +296,7 @@ struct HashGoldenPhase3Tests {
             ]
         )
         let expected = "RIHS01_1b8e8aca958cbea28fe6ef60bf6c19b683c97a9ef60bb34752067d0f2f7ab437"
-        #expect(RIHS01.hash(ir) == expected)
+        #expect(RIHS01.hash(ir, registry: [:]) == expected)
     }
 
     @Test("action_msgs/GoalInfo — nested cross-package fields")

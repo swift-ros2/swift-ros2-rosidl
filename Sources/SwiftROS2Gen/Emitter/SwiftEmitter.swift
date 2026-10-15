@@ -29,7 +29,6 @@ public enum SwiftEmitter {
         isNested: Bool = false,
         structNameOverride: String? = nil,
         nestedNameOverrides: [String: String] = [:],
-        extraImports: [String] = [],
         moduleNames: ModuleNames = [:]
     ) -> String {
         var out = ""
@@ -38,7 +37,7 @@ public enum SwiftEmitter {
         out += "\n"
         out += ModuleImports.importLines(
             ownPackage: ir.package, fieldTypes: ir.fields.map(\.type),
-            moduleNames: moduleNames, extraImports: extraImports)
+            moduleNames: moduleNames)
         out += "\n"
         out += emitMessageStruct(
             ir,
@@ -186,7 +185,6 @@ public enum SwiftEmitter {
         responseHash: String?,
         serviceHash: String? = nil,
         sourceLabel: String,
-        extraImports: [String] = [],
         moduleNames: ModuleNames = [:]
     ) -> String {
         var out = ""
@@ -194,8 +192,7 @@ public enum SwiftEmitter {
         out += "// Source: \(sourceLabel)\n"
         out += "\n"
         out += ModuleImports.importLines(
-            ownPackage: package, fieldTypes: [], moduleNames: moduleNames,
-            extraImports: extraImports)
+            ownPackage: package, fieldTypes: [], moduleNames: moduleNames)
         out += "\n"
         out += "/// \(package)/srv/\(serviceTypeName)\n"
         out += "public enum \(umbrellaName): ROS2ServiceType {\n"
@@ -235,7 +232,6 @@ public enum SwiftEmitter {
         _ ir: ActionIR,
         sourceLabel: String,
         nestedNameOverrides: [String: String] = [:],
-        extraImports: [String] = [],
         moduleNames: ModuleNames = [:]
     ) -> String {
         guard let hashes = ir.perDistroHashes["jazzy"] else {
@@ -265,7 +261,7 @@ public enum SwiftEmitter {
         ].flatMap { $0.fields.map(\.type) }
         out += ModuleImports.importLines(
             ownPackage: ir.package, fieldTypes: actionFieldTypes,
-            moduleNames: moduleNames, extraImports: extraImports)
+            moduleNames: moduleNames)
         out += "\n"
 
         // Outer ROS2Action enum.

@@ -4,7 +4,7 @@ public typealias ModuleNames = [String: String]
 /// Computes the `import` list of a generated file.
 ///
 /// Every generated file imports ``cdrModule`` and ``protocolsModule``. It also imports the
-/// module of every other ROS package its fields reference, and the caller's extra imports.
+/// module of every other ROS package its fields reference.
 /// Duplicates and the file's own module are dropped, and the list is sorted
 /// lexicographically so generated files pass swift-format's `OrderedImports` rule.
 public enum ModuleImports {
@@ -25,8 +25,7 @@ public enum ModuleImports {
     public static func imports(
         ownPackage: String,
         fieldTypes: [FieldType],
-        moduleNames: ModuleNames,
-        extraImports: [String]
+        moduleNames: ModuleNames
     ) -> [String] {
         let ownModule = moduleName(forPackage: ownPackage, moduleNames: moduleNames)
         var packages = Set<String>()
@@ -35,23 +34,19 @@ public enum ModuleImports {
         for package in packages {
             modules.insert(moduleName(forPackage: package, moduleNames: moduleNames))
         }
-        modules.formUnion(extraImports)
         modules.remove(ownModule)
         modules.remove(cdrModule)
         return modules.sorted()
     }
 
-    /// The `import` lines of a generated file: ``cdrModule`` plus ``imports(ownPackage:fieldTypes:moduleNames:extraImports:)``,
+    /// The `import` lines of a generated file: ``cdrModule`` plus ``imports(ownPackage:fieldTypes:moduleNames:)``,
     /// sorted lexicographically, one `import <Module>` per line.
     public static func importLines(
         ownPackage: String,
         fieldTypes: [FieldType],
-        moduleNames: ModuleNames,
-        extraImports: [String]
+        moduleNames: ModuleNames
     ) -> String {
-        let modules = imports(
-            ownPackage: ownPackage, fieldTypes: fieldTypes, moduleNames: moduleNames,
-            extraImports: extraImports)
+        let modules = imports(ownPackage: ownPackage, fieldTypes: fieldTypes, moduleNames: moduleNames)
         return ([cdrModule] + modules).sorted().map { "import \($0)\n" }.joined()
     }
 

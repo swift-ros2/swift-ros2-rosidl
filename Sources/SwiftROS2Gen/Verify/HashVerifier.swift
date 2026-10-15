@@ -19,8 +19,6 @@ public struct HashVerifier {
     public struct Mismatch: Sendable {
         public let entry: VerifyPlanEntry
         public let observedHash: String
-        public let oracleJSONSource: String
-        public let oracleJSON: String
     }
 
     public struct Report: Sendable {
@@ -87,18 +85,7 @@ public struct HashVerifier {
                         oracleJSON: oracleEntry.canonicalJSON
                     )
                 }
-                let oraclePath = """
-                    /opt/ros/\(plannedEntry.distro)/share/\
-                    \(plannedEntry.package)/\(plannedEntry.kind.rawValue)/\
-                    \(plannedEntry.topLevelTypeName).json
-                    """
-                mismatches.append(
-                    Mismatch(
-                        entry: plannedEntry,
-                        observedHash: observed,
-                        oracleJSONSource: oraclePath,
-                        oracleJSON: oracleEntry.canonicalJSON
-                    ))
+                mismatches.append(Mismatch(entry: plannedEntry, observedHash: observed))
             }
         }
         return Report(

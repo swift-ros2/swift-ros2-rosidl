@@ -8,7 +8,6 @@ public enum CDRDecodingError: Error, LocalizedError {
     case invalidEncapsulationHeader
     case unexpectedEndOfData(expected: Int, remaining: Int)
     case invalidStringEncoding
-    case invalidArraySize(expected: Int, available: Int)
     case sequenceTooLarge(elements: UInt32, max: Int)
     case byteSequenceTooLarge(bytes: UInt32, max: Int)
     case stringTooLarge(length: UInt32, max: Int)
@@ -22,8 +21,6 @@ public enum CDRDecodingError: Error, LocalizedError {
             return "Unexpected end of CDR data: need \(expected) bytes but only \(remaining) remain"
         case .invalidStringEncoding:
             return "Invalid UTF-8 string encoding in CDR data"
-        case .invalidArraySize(let expected, let available):
-            return "Invalid array size: expected \(expected) elements but data has room for \(available)"
         case .sequenceTooLarge(let elements, let max):
             return "CDR sequence declares \(elements) elements which exceeds maximum \(max)"
         case .byteSequenceTooLarge(let bytes, let max):
