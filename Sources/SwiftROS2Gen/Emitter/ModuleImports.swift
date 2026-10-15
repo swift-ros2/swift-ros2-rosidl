@@ -3,7 +3,8 @@ public typealias ModuleNames = [String: String]
 
 /// Computes the `import` list of a generated file.
 ///
-/// Every generated file imports ``cdrModule`` and ``protocolsModule``. It also imports the
+/// Every generated file imports ``protocolsModule``, and every file that encodes or decodes a type
+/// (all but service umbrellas) imports ``cdrModule``. A file also imports the
 /// module of every other ROS package its fields reference.
 /// Duplicates and the file's own module are dropped, and the list is sorted
 /// lexicographically so generated files pass swift-format's `OrderedImports` rule.
