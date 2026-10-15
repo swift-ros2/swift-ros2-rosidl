@@ -92,12 +92,7 @@ public enum Parser {
                 defaultExpression = nil
             }
 
-            let fieldType = try parseTypeToken(
-                typeToken,
-                currentPackage: package,
-                file: file,
-                line: lineNumber
-            )
+            let fieldType = try parseTypeToken(typeToken, file: file, line: lineNumber)
             try validateFieldName(nameToken, file: file, line: lineNumber)
             fields.append(
                 IDLField(
@@ -297,12 +292,7 @@ public enum Parser {
 
     /// Decompose a type token like `uint8[16]`, `float32[<=8]`, `string<=255`,
     /// or `geometry_msgs/Vector3[]` into an `IDLFieldType`.
-    static func parseTypeToken(
-        _ token: String,
-        currentPackage: String,
-        file: String,
-        line: Int
-    ) throws -> IDLFieldType {
+    static func parseTypeToken(_ token: String, file: String, line: Int) throws -> IDLFieldType {
         if let openIdx = token.firstIndex(of: "[") {
             guard let closeIdx = token.lastIndex(of: "]"), closeIdx > openIdx else {
                 throw ParseError(
@@ -320,9 +310,7 @@ public enum Parser {
             }
             let baseToken = String(token[..<openIdx])
             let inside = String(token[token.index(after: openIdx)..<closeIdx])
-            let element = try parseScalarTypeToken(
-                baseToken, currentPackage: currentPackage, file: file, line: line
-            )
+            let element = try parseScalarTypeToken(baseToken, file: file, line: line)
             if inside.isEmpty {
                 return .sequence(element: element, upperBound: nil)
             }
@@ -367,18 +355,12 @@ public enum Parser {
                 )
             }
         }
-        return try parseScalarTypeToken(
-            token, currentPackage: currentPackage, file: file, line: line
-        )
+        return try parseScalarTypeToken(token, file: file, line: line)
     }
 
     /// Resolve a non-decorated scalar type token into a primitive or nested ref.
-    static func parseScalarTypeToken(
-        _ token: String,
-        currentPackage: String,
-        file: String,
-        line: Int
-    ) throws -> IDLFieldType {
+    /// A token without a package resolves to the declaring package later, in `IRBuilder`.
+    static func parseScalarTypeToken(_ token: String, file: String, line: Int) throws -> IDLFieldType {
         if let prim = PrimitiveType(rawROS: token) {
             return .primitive(prim)
         }

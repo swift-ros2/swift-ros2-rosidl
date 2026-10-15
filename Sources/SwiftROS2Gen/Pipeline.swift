@@ -21,7 +21,6 @@ public enum GeneratorError: Error, CustomStringConvertible {
     case packageDirectoryMissing(URL)
     case parse(ParseError)
     case unresolvedNestedType(package: String, typeName: String)
-    case invalidExtraImport(String)
     /// A package is passed both as an emitted input and as a dependency-only input.
     case conflictingPackageRoles(String)
     /// A field exists in only some modern distributions (Jazzy and later), which generated
@@ -37,9 +36,6 @@ public enum GeneratorError: Error, CustomStringConvertible {
         case .unresolvedNestedType(let pkg, let type):
             return
                 "unresolved nested type '\(pkg)/\(type)' — pass --input or --dependency for '\(pkg)' on the same CLI invocation"
-        case .invalidExtraImport(let value):
-            return
-                "invalid --extra-import '\(value)' — expected a Swift module identifier (e.g. 'SwiftROS2Messages' or 'My.Nested.Module')"
         case .conflictingPackageRoles(let name):
             return "package '\(name)' is passed both as --input and as --dependency"
         case .modernDistroDivergence(let type, let field, let presentIn, let missingFrom):
@@ -49,11 +45,10 @@ public enum GeneratorError: Error, CustomStringConvertible {
     }
 }
 
-/// Module-name validation shared by the CLI and the `Pipeline` so untrusted
-/// user input cannot be spliced verbatim into emitted `import` lines. A valid
-/// module identifier matches `[A-Za-z_][A-Za-z0-9_]*`, optionally dotted for
-/// nested modules (e.g. `Foo.Bar`). Whitespace, quotes, and newlines are all
-/// rejected.
+/// Module-name validation for the CLI's `--module` values, so user input cannot be spliced
+/// verbatim into emitted `import` lines. A valid module identifier matches
+/// `[A-Za-z_][A-Za-z0-9_]*`, optionally dotted for nested modules (e.g. `Foo.Bar`).
+/// Whitespace, quotes, and newlines are all rejected.
 public enum ModuleIdentifier {
     /// Returns `true` when `value` is a syntactically valid Swift module
     /// identifier (single segment or dotted). Empty strings are rejected.
@@ -82,16 +77,6 @@ public enum ModuleIdentifier {
         return true
     }
 
-    /// Throws ``GeneratorError/invalidExtraImport(_:)`` for any entry that
-    /// isn't a valid module identifier. Called by the `Pipeline` boundary so
-    /// `extraImports` can be trusted by the emitter even when the CLI
-    /// validation layer is bypassed (e.g. when `Pipeline` is invoked directly
-    /// from a unit test).
-    public static func validateAll(_ values: [String]) throws {
-        for value in values where !isValid(value) {
-            throw GeneratorError.invalidExtraImport(value)
-        }
-    }
 }
 
 /// Maps `<pkg>/msg/<TypeName>` → preferred Swift struct name. Lets the emitter use
@@ -112,92 +97,6 @@ public struct GeneratedFile: Equatable, Sendable {
 
 /// Orchestrates parsing, IR building, hashing, and emission for a ROS 2 package.
 public enum Pipeline {
-    /// Process a single jazzy-distro package and return generated files.
-    /// Phase 1: only primitive-typed messages are accepted; everything else
-    /// surfaces as a `GeneratorError.parse(...)`.
-    ///
-    /// - Parameters:
-    ///   - input: Package name and directory containing the `msg/` subdirectory.
-    ///   - typesAllowList: When non-nil, only `.msg` files whose stem (e.g. `"Bool"`)
-    ///     appear in this set are processed. Files outside the allow-list are silently
-    ///     skipped before reaching the parser, keeping Phase 1 functional against real
-    ///     vendor directories that contain unsupported message types.
-    public static func generate(
-        for input: PackageInput,
-        typesAllowList: Set<String>? = nil,
-        extraImports: [String] = [],
-        moduleNames: ModuleNames = [:]
-    ) throws -> [GeneratedFile] {
-        try ModuleIdentifier.validateAll(extraImports)
-        let msgDir = input.directory.appendingPathComponent("msg", isDirectory: true)
-        var isDir: ObjCBool = false
-        guard
-            FileManager.default.fileExists(atPath: msgDir.path, isDirectory: &isDir),
-            isDir.boolValue
-        else {
-            throw GeneratorError.packageDirectoryMissing(msgDir)
-        }
-        let entries = try FileManager.default.contentsOfDirectory(
-            at: msgDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        let msgFiles =
-            entries
-            .filter { $0.pathExtension == "msg" }
-            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-        var results: [GeneratedFile] = []
-        for fileURL in msgFiles {
-            let typeName = fileURL.deletingPathExtension().lastPathComponent
-            // Apply allow-list at parse boundary: skip files not in the allow-list.
-            if let allowList = typesAllowList, !allowList.contains(typeName) {
-                continue
-            }
-            let contents = try String(contentsOf: fileURL, encoding: .utf8)
-            let label = "\(input.name)/msg/\(typeName).msg"
-            do {
-                let idl = try Parser.parseMessage(
-                    source: contents,
-                    file: label,
-                    package: input.name,
-                    typeName: typeName
-                )
-                let ir0 = IRBuilder.build(jazzy: idl)
-                let hash = RIHS01.hash(ir0)
-                let ir = MessageIR(
-                    package: ir0.package,
-                    typeName: ir0.typeName,
-                    kind: ir0.kind,
-                    fields: ir0.fields,
-                    constants: ir0.constants,
-                    perDistroHashes: ["jazzy": hash]
-                )
-                let key = "\(ir.package)/msg/\(ir.typeName)"
-                let nameOverride = Pipeline.defaultSwiftNameOverrides[key]
-                let isNested = Pipeline.defaultNestedOnlyTypes.contains(key)
-                let swift = SwiftEmitter.emit(
-                    ir,
-                    sourceLabel: label,
-                    isNested: isNested,
-                    structNameOverride: nameOverride,
-                    nestedNameOverrides: Pipeline.defaultSwiftNameOverrides,
-                    extraImports: extraImports,
-                    moduleNames: moduleNames
-                )
-                let pascalPackage = pascal(input.name)
-                let structName = nameOverride ?? SwiftEmitter.swiftStructName(typeName: typeName)
-                results.append(
-                    GeneratedFile(
-                        relativePath: "\(pascalPackage)/\(structName).swift",
-                        contents: swift
-                    ))
-            } catch let err as ParseError {
-                throw GeneratorError.parse(err)
-            }
-        }
-        return results
-    }
-
     static func pascal(_ snake: String) -> String {
         snake.split(separator: "_").map {
             $0.prefix(1).uppercased() + $0.dropFirst().lowercased()
@@ -275,7 +174,6 @@ extension Pipeline {
 
     /// One parsed message, service half or action part, with the distributions that have it.
     struct CollectedIR {
-        let run: PackageRun
         let ir: MessageIR
         let sourceLabel: String
         /// Stem of the IDL file the type comes from (`Fibonacci` for `Fibonacci_SendGoal_Request`),
@@ -322,7 +220,7 @@ extension Pipeline {
                 for entry in try parsePackage(run: primaryRun) {
                     unresolvedIRs.append(
                         CollectedIR(
-                            run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel,
+                            ir: entry.ir, sourceLabel: entry.sourceLabel,
                             topLevelTypeName: entry.ir.typeName, distros: entry.distros))
                 }
             } else {
@@ -332,7 +230,7 @@ extension Pipeline {
                     try validateModernAgreement(entry.ir)
                     unresolvedIRs.append(
                         CollectedIR(
-                            run: primaryRun, ir: entry.ir, sourceLabel: entry.sourceLabel,
+                            ir: entry.ir, sourceLabel: entry.sourceLabel,
                             topLevelTypeName: entry.ir.typeName, distros: entry.distros))
                 }
             }
@@ -347,7 +245,7 @@ extension Pipeline {
                 for half in [svc.requestIDL, svc.responseIDL] {
                     unresolvedIRs.append(
                         CollectedIR(
-                            run: primaryRun, ir: IRBuilder.build(jazzy: half, kind: .srv), sourceLabel: label,
+                            ir: IRBuilder.build(jazzy: half, kind: .srv), sourceLabel: label,
                             topLevelTypeName: svc.typeName, distros: distros))
                 }
             }
@@ -369,7 +267,7 @@ extension Pipeline {
                 for ir in parts {
                     unresolvedIRs.append(
                         CollectedIR(
-                            run: primaryRun, ir: ir, sourceLabel: label, topLevelTypeName: act.typeName,
+                            ir: ir, sourceLabel: label, topLevelTypeName: act.typeName,
                             distros: distros))
                 }
             }
@@ -453,10 +351,8 @@ extension Pipeline {
     /// even though the source IDLs come from multiple distros.
     public static func generateMulti(
         _ runs: [PackageRun],
-        extraImports: [String] = [],
         moduleNames: ModuleNames = [:]
     ) throws -> [GeneratedFile] {
-        try ModuleIdentifier.validateAll(extraImports)
         let c = try collect(runs)
         // Precompute the modern (jazzy-view) hash for every IR. Single-distro
         // humble-only inputs do not need a Jazzy hash (humble has no RIHS01
@@ -524,7 +420,6 @@ extension Pipeline {
                 isNested: isNested,
                 structNameOverride: nameOverride,
                 nestedNameOverrides: c.nameOverrides,
-                extraImports: extraImports,
                 moduleNames: moduleNames
             )
             let pascalPackage = pascal(entry.ir.package)
@@ -564,7 +459,6 @@ extension Pipeline {
                 responseHash: responseHash,
                 serviceHash: serviceHash,
                 sourceLabel: "\(svc.package)/srv/\(svc.typeName).srv",
-                extraImports: extraImports,
                 moduleNames: moduleNames
             )
             let pascalPackage = pascal(svc.package)
@@ -589,7 +483,6 @@ extension Pipeline {
                 actionIR,
                 sourceLabel: label,
                 nestedNameOverrides: c.nameOverrides,
-                extraImports: extraImports,
                 moduleNames: moduleNames
             )
             let pascalPackage = pascal(act.package)
@@ -1153,29 +1046,6 @@ extension Pipeline {
             parsed.append(ParsedEntry(ir: mergedIR, sourceLabel: label, distros: Set(perDistroIDL.keys)))
         }
         return parsed
-    }
-
-    /// Parse every `.msg` across `runs` and assemble a fully-resolved
-    /// `[rosTypeName: MessageIR]` registry (keyed by `<pkg>/msg/<Type>`). Unlike
-    /// ``generateMulti``, this stops short of hashing / emission — it exists so
-    /// callers can recurse into nested message IRs
-    /// (`std_msgs/Header → builtin_interfaces/Time`, …) without
-    /// re-implementing the cross-package gather.
-    ///
-    /// Single-distro IRs only: no per-distro merge is performed. Service and
-    /// action IRs are intentionally excluded; only `.msg` types are returned.
-    ///
-    /// Throws ``GeneratorError/unresolvedNestedType(package:typeName:)`` when a
-    /// nested reference cannot be resolved from the supplied `runs`.
-    public static func buildMessageRegistry(_ runs: [PackageRun]) throws -> [String: MessageIR] {
-        var registry: [String: MessageIR] = [:]
-        for run in runs.map(\.parseRun) {
-            for entry in try parsePackage(run: run) {
-                registry[entry.ir.rosTypeName] = entry.ir
-            }
-        }
-        try validateAllReferencesResolved(registry: registry)
-        return registry
     }
 
     private static func validateAllReferencesResolved(registry: [String: MessageIR]) throws {

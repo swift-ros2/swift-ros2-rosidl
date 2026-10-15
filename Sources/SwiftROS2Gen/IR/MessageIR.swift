@@ -91,18 +91,6 @@ public indirect enum FieldType: Equatable, Sendable {
     case boundedString(isWide: Bool, upperBound: Int)
 }
 
-extension FieldType {
-    /// Canonical ROS type name (`<pkg>/msg/<Type>`) for nested references.
-    /// `nil` for primitive / array / sequence / boundedString types.
-    public var rosTypeName: String? {
-        switch self {
-        case .primitive: return nil
-        case .nested(let pkg, let type): return "\(pkg)/msg/\(type)"
-        case .array, .sequence, .boundedString: return nil
-        }
-    }
-}
-
 /// Typed representation of a field default. Emitted as a Swift literal in the
 /// generated `init(...)` parameter default.
 public enum DefaultValue: Equatable, Sendable {

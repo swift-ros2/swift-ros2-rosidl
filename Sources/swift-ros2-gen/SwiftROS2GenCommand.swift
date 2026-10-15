@@ -12,7 +12,7 @@ struct SwiftROS2GenCommand: ParsableCommand {
     @Option(
         name: .long,
         help:
-            "<package_name>=<directory>@<distro>. Repeatable. Phase 4 supports multi-distro inputs: pass two or more entries with the same package name and different distros (e.g. @humble + @jazzy) to produce a single distro-conditional Swift file per type."
+            "<package_name>=<directory>@<distro>. Repeatable. Pass the same package name with several distros (e.g. @humble and @jazzy) to produce one distro-conditional Swift file per type."
     )
     var input: [String] = []
 
@@ -39,13 +39,6 @@ struct SwiftROS2GenCommand: ParsableCommand {
 
     @Flag(name: .long, help: "Print what would be written; do not touch the filesystem.")
     var dryRun: Bool = false
-
-    @Option(
-        name: .long,
-        help:
-            "Repeatable. Additional `import <Module>` statement(s) to inject into every emitted Swift file, merged with the derived ones (SwiftROS2Messages and the module of every referenced package)."
-    )
-    var extraImport: [String] = []
 
     @Option(
         name: .long,
@@ -92,26 +85,9 @@ struct SwiftROS2GenCommand: ParsableCommand {
     )
     var diagnose: Bool = false
 
-    @Option(
-        name: .long,
-        help: """
-            Comma-separated deny-list of types to exclude from --verify-hashes (e.g. 'Char' to skip a known \
-            generator drift). Applied after --types.
-            """
-    )
-    var excludeTypes: String?
-
     func validate() throws {
-        // Reject untrusted whitespace / quotes / newlines in --extra-import
-        // before the value is spliced into emitted Swift `import` lines.
-        // ``ModuleIdentifier`` enforces the same rule the Pipeline boundary
-        // re-validates, but surfacing it here lets ArgumentParser print the
-        // CLI usage banner instead of an opaque GeneratorError.
-        for value in extraImport where !ModuleIdentifier.isValid(value) {
-            throw ValidationError(
-                "invalid --extra-import '\(value)' — expected a Swift module identifier (e.g. 'SwiftROS2Messages' or 'My.Nested.Module')"
-            )
-        }
+        // Reject whitespace, quotes and newlines in a --module value before it is spliced into
+        // emitted Swift `import` lines.
         for raw in module {
             let parts = raw.split(separator: "=", maxSplits: 1).map(String.init)
             guard parts.count == 2, !parts[0].isEmpty, ModuleIdentifier.isValid(parts[1]) else {
@@ -172,7 +148,7 @@ struct SwiftROS2GenCommand: ParsableCommand {
         let files: [GeneratedFile]
         var oracleSamples: [GeneratedFile] = []
         do {
-            files = try Pipeline.generateMulti(runs, extraImports: extraImport, moduleNames: moduleNames)
+            files = try Pipeline.generateMulti(runs, moduleNames: moduleNames)
             if emitOracleSamples != nil {
                 oracleSamples = try Pipeline.generateOracleSamples(runs, moduleNames: moduleNames)
             }
@@ -235,30 +211,15 @@ struct SwiftROS2GenCommand: ParsableCommand {
                     input: PackageInput(name: pkg.packageName, directory: pkg.directory, distro: pkg.distro),
                     typesAllowList: nil, emit: false))
         }
-        let denyList: Set<String> =
-            excludeTypes.map {
-                Set($0.split(separator: ",").map(String.init))
-            } ?? []
-        let rawPlan: [VerifyPlanEntry]
+        let plan: [VerifyPlanEntry]
         do {
-            rawPlan = try Pipeline.buildVerifyPlan(runs, distros: allowedDistros)
+            plan = try Pipeline.buildVerifyPlan(runs, distros: allowedDistros)
         } catch let err as GeneratorError {
             FileHandle.standardError.write(Data("error: \(err)\n".utf8))
             throw ExitCode.failure
         }
-        // Apply the deny-list. We compare against both the contained
-        // `typeName` and the `topLevelTypeName` so excluding a service /
-        // action stem (e.g. `Fibonacci`) drops every sub-type derived
-        // from that file.
-        let plan: [VerifyPlanEntry] =
-            denyList.isEmpty
-            ? rawPlan
-            : rawPlan.filter {
-                !denyList.contains($0.typeName)
-                    && !denyList.contains($0.topLevelTypeName)
-            }
         // An empty plan means the input filters (--input paths, --types,
-        // --distros, --exclude-types) selected zero IRs. That is almost
+        // --distros) selected zero IRs. That is almost
         // always a misconfiguration — e.g. a typo'd vendor path on a
         // case-sensitive Linux runner that resolves to nothing — which
         // would otherwise be reported as `mismatches=0 missing=0` and pass
@@ -266,7 +227,7 @@ struct SwiftROS2GenCommand: ParsableCommand {
         if plan.isEmpty {
             FileHandle.standardError.write(
                 Data(
-                    "error: --verify-hashes selected 0 types — check --input paths, --types, --distros, --exclude-types\n"
+                    "error: --verify-hashes selected 0 types — check --input paths, --types, --distros\n"
                         .utf8))
             throw ExitCode.failure
         }

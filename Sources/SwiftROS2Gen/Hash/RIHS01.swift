@@ -27,21 +27,6 @@ public enum RIHS01 {
 
     // MARK: - Public API
 
-    /// Phase 1 shim: hash a primitive-only IR with no nested deps.
-    ///
-    /// Traps if `ir` contains any nested fields — the empty registry would
-    /// otherwise hit `preconditionFailure` deep inside `referencedTypeDescriptions`
-    /// with a message about the unresolved type. Surfacing the misuse at the call
-    /// site is friendlier than burying it in the BFS.
-    public static func hash(_ ir: MessageIR) -> String {
-        precondition(
-            !ir.fields.contains(where: {
-                if case .nested = $0.type { return true } else { return false }
-            }),
-            "RIHS01.hash(_:) requires primitive-only IR; pass a registry for nested types")
-        return hash(ir, registry: [:])
-    }
-
     /// Hash a (possibly nested) IR. `registry` maps `"<pkg>/msg/<Type>"` to the
     /// `MessageIR` for every type the root may reference (transitively). The
     /// Pipeline (Task 9) builds the registry once per multi-package run.

@@ -44,8 +44,8 @@ public struct ROS2ServiceTypeInfo: Sendable {
     /// `std_srvs::srv::dds_::Trigger_`), rather than the request or response hash.
     public let serviceTypeHash: String?
 
-    /// Creates service type information. `serviceTypeHash` defaults to `nil`, so existing
-    /// call sites compile unchanged.
+    /// Creates service type information. A hash left `nil` means the type has no RIHS01 hash
+    /// (Humble) or it is unknown.
     public init(
         serviceName: String,
         requestTypeName: String,
@@ -99,29 +99,8 @@ public struct ROS2ActionTypeInfo: Sendable {
     /// Hash of the `<Action>_GetResult` service, the type of the action's `get_result` service.
     public let getResultServiceTypeHash: String?
 
-    /// Legacy 3-hash initializer — kept for ABI/source compatibility with 0.6.x. Synthesized
-    /// wrapper hashes default to `nil`.
-    public init(
-        actionName: String,
-        goalTypeHash: String? = nil,
-        resultTypeHash: String? = nil,
-        feedbackTypeHash: String? = nil
-    ) {
-        self.init(
-            actionName: actionName,
-            goalTypeHash: goalTypeHash,
-            resultTypeHash: resultTypeHash,
-            feedbackTypeHash: feedbackTypeHash,
-            sendGoalRequestTypeHash: nil,
-            sendGoalResponseTypeHash: nil,
-            getResultRequestTypeHash: nil,
-            getResultResponseTypeHash: nil,
-            feedbackMessageTypeHash: nil
-        )
-    }
-
-    /// Full initializer — supply any subset of hashes; unknown ones stay `nil`. The two
-    /// service hashes default to `nil`, so eight-hash call sites compile unchanged.
+    /// Creates action type information. Pass `nil` for a hash that is unknown, or for every
+    /// hash on Humble, which has no RIHS01 hashes. `swift-ros2-gen` fills in all of them.
     public init(
         actionName: String,
         goalTypeHash: String?,
@@ -170,12 +149,6 @@ public typealias CDRCodable = CDREncodable & CDRDecodable
 public protocol ROS2MessageType: Sendable {
     static var typeInfo: ROS2MessageTypeInfo { get }
 }
-
-/// A message type that can be published (encode only)
-public typealias ROS2Publishable = ROS2MessageType & CDREncodable
-
-/// A message type that can be subscribed to (decode only)
-public typealias ROS2Subscribable = ROS2MessageType & CDRDecodable
 
 /// A message type that supports both publish and subscribe
 public typealias ROS2Message = ROS2MessageType & CDRCodable

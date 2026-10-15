@@ -85,8 +85,8 @@ struct SwiftROS2GenPlugin: BuildToolPlugin {
             .map { Path($0.path) }
     }
 
-    /// Static counterpart of `SwiftROS2Gen.Pipeline.generate(for:)`'s relativePath
-    /// computation: `<PascalPackage>/<SwiftStructName>.swift`.
+    /// Static counterpart of the `relativePath` that `SwiftROS2Gen.Pipeline.generateMulti` gives a message:
+    /// `<PascalPackage>/<SwiftStructName>.swift`.
     static func outputFile(for input: Path, packageName: String, outputRoot: Path) -> Path {
         let typeName = input.stem
         let pascalPackage = pascal(packageName)

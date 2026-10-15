@@ -13,18 +13,8 @@ struct ModuleImportsTests {
             .primitive(.float64),
         ]
         let imports = ModuleImports.imports(
-            ownPackage: "nav_msgs", fieldTypes: fields, moduleNames: [:], extraImports: [])
+            ownPackage: "nav_msgs", fieldTypes: fields, moduleNames: [:])
         #expect(imports == ["GeometryMsgs", "StdMsgs", "SwiftROS2Messages"])
-    }
-
-    @Test("extra imports join the derived ones, sorted and without duplicates")
-    func extraImportsDeduplicated() {
-        let imports = ModuleImports.imports(
-            ownPackage: "my_msgs",
-            fieldTypes: [.nested(package: "std_msgs", typeName: "Header")],
-            moduleNames: [:],
-            extraImports: ["StdMsgs", "SwiftROS2Messages", "MyHelpers"])
-        #expect(imports == ["MyHelpers", "StdMsgs", "SwiftROS2Messages"])
     }
 
     @Test("packages mapped to the file's own module are not imported")
@@ -33,7 +23,7 @@ struct ModuleImportsTests {
         let imports = ModuleImports.imports(
             ownPackage: "sensor_msgs",
             fieldTypes: [.nested(package: "std_msgs", typeName: "Header")],
-            moduleNames: names, extraImports: [])
+            moduleNames: names)
         #expect(imports == ["SwiftROS2Messages"])
     }
 

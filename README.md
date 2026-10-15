@@ -235,9 +235,8 @@ swift run swift-ros2-gen \
 ```
 
 `--distros` selects the distributions to check. The default is every distribution of the
-inputs except Humble, and each one must be the distribution of the image. `--exclude-types A,B`
-skips types, and `--diagnose` writes the oracle JSON of a mismatch under
-`/tmp/swift-ros2-gen-diagnose/`.
+inputs except Humble, and each one must be the distribution of the image. `--diagnose` writes
+the oracle JSON of a mismatch under `/tmp/swift-ros2-gen-diagnose/`.
 
 ### The build plugin
 
@@ -253,7 +252,7 @@ committed. It covers only self-contained message packages:
   `unresolved nested type`.
 - It reads the IDL as Jazzy (`@jazzy`) and has no per-distribution input, so it cannot merge
   Humble differences.
-- It passes no `--module` or `--extra-import`.
+- It passes no `--module`.
 - The target still needs one Swift file of its own. SwiftPM drops a target without sources
   before the plugin runs.
 
