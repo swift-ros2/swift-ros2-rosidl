@@ -38,7 +38,7 @@ struct ActionHashGoldenTests {
             package: "example_interfaces",
             typeName: "Fibonacci"
         )
-        var ir = IRBuilder.build(jazzy: idl)
+        var ir = try IRBuilder.build(jazzy: idl)
         IRBuilder.populateActionHashes(
             &ir, distro: "jazzy", extraRegistry: Self.extraRegistry())
         let h = try #require(ir.perDistroHashes["jazzy"])

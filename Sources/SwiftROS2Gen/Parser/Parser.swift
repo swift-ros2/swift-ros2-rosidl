@@ -8,6 +8,18 @@ public enum Parser {
         package: String,
         typeName: String
     ) throws -> IDLFile {
+        try parseMessage(source: source, file: file, package: package, typeName: typeName, firstLine: 1)
+    }
+
+    /// `firstLine` is the line of `file` that `source` starts at, so the lines of the second and
+    /// third blocks of a `.srv` or `.action` file are lines of the whole file.
+    static func parseMessage(
+        source: String,
+        file: String,
+        package: String,
+        typeName: String,
+        firstLine: Int
+    ) throws -> IDLFile {
         var fields: [IDLField] = []
         var constants: [IDLConstant] = []
         // Normalize CRLF before splitting. Swift treats `\r\n` as a single
@@ -17,7 +29,7 @@ public enum Parser {
         let normalized = normalizeLineEndings(source)
         let rawLines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
         for (index, raw) in rawLines.enumerated() {
-            let lineNumber = index + 1
+            let lineNumber = firstLine + index
             let stripped = stripCommentAndTrim(String(raw))
             if stripped.isEmpty { continue }
             // Split into `<typeToken> <rest>` on the first run of whitespace.
@@ -146,7 +158,8 @@ public enum Parser {
             source: resText,
             file: file,
             package: package,
-            typeName: typeName + "_Response"
+            typeName: typeName + "_Response",
+            firstLine: sep + 2
         )
         return IDLService(package: package, typeName: typeName, request: req, response: res)
     }
@@ -198,13 +211,15 @@ public enum Parser {
             source: resultText,
             file: file,
             package: package,
-            typeName: typeName + "_Result"
+            typeName: typeName + "_Result",
+            firstLine: goalSep + 2
         )
         let feedback = try parseMessage(
             source: feedbackText,
             file: file,
             package: package,
-            typeName: typeName + "_Feedback"
+            typeName: typeName + "_Feedback",
+            firstLine: resultSep + 2
         )
         return IDLAction(
             package: package,

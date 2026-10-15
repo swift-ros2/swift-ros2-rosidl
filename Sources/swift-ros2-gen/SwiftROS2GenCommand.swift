@@ -152,8 +152,9 @@ struct SwiftROS2GenCommand: ParsableCommand {
             if emitOracleSamples != nil {
                 oracleSamples = try Pipeline.generateOracleSamples(runs, moduleNames: moduleNames)
             }
-        } catch let err as GeneratorError {
-            FileHandle.standardError.write(Data("error: \(err)\n".utf8))
+        } catch {
+            // GeneratorError, and IRMergeError when distributions cannot be merged.
+            FileHandle.standardError.write(Data("error: \(error)\n".utf8))
             throw ExitCode.failure
         }
         try write(files, to: outputRoot)
@@ -214,8 +215,8 @@ struct SwiftROS2GenCommand: ParsableCommand {
         let plan: [VerifyPlanEntry]
         do {
             plan = try Pipeline.buildVerifyPlan(runs, distros: allowedDistros)
-        } catch let err as GeneratorError {
-            FileHandle.standardError.write(Data("error: \(err)\n".utf8))
+        } catch {
+            FileHandle.standardError.write(Data("error: \(error)\n".utf8))
             throw ExitCode.failure
         }
         // An empty plan means the input filters (--input paths, --types,

@@ -5,7 +5,7 @@ import Testing
 @Suite("IRBuilder — Phase 2 resolution")
 struct IRBuilderTests {
     @Test("converts snake_case field names to camelCase")
-    func convertsSnakeCase() {
+    func convertsSnakeCase() throws {
         let idl = IDLFile(
             package: "std_msgs",
             typeName: "Bool",
@@ -15,7 +15,7 @@ struct IRBuilderTests {
                 IDLField(name: "_leading_underscore", type: .primitive(.int32), sourceLine: 3),
             ]
         )
-        let ir = IRBuilder.build(jazzy: idl)
+        let ir = try IRBuilder.build(jazzy: idl)
         #expect(ir.fields[0].swiftName == "linearAccelerationX")
         #expect(ir.fields[1].swiftName == "data")
         #expect(ir.fields[2].swiftName == "_leadingUnderscore")
@@ -23,7 +23,7 @@ struct IRBuilderTests {
     }
 
     @Test("resolves a same-package nested reference to the IDL's owning package")
-    func resolvesSamePackage() {
+    func resolvesSamePackage() throws {
         let idl = IDLFile(
             package: "geometry_msgs",
             typeName: "Twist",
@@ -32,13 +32,13 @@ struct IRBuilderTests {
                 IDLField(name: "angular", type: .nested(package: nil, typeName: "Vector3"), sourceLine: 2),
             ]
         )
-        let ir = IRBuilder.build(jazzy: idl)
+        let ir = try IRBuilder.build(jazzy: idl)
         #expect(ir.fields[0].type == .nested(package: "geometry_msgs", typeName: "Vector3"))
         #expect(ir.fields[1].type == .nested(package: "geometry_msgs", typeName: "Vector3"))
     }
 
     @Test("preserves cross-package references verbatim")
-    func preservesCrossPackage() {
+    func preservesCrossPackage() throws {
         let idl = IDLFile(
             package: "geometry_msgs",
             typeName: "PoseStamped",
@@ -47,13 +47,13 @@ struct IRBuilderTests {
                 IDLField(name: "pose", type: .nested(package: nil, typeName: "Pose"), sourceLine: 2),
             ]
         )
-        let ir = IRBuilder.build(jazzy: idl)
+        let ir = try IRBuilder.build(jazzy: idl)
         #expect(ir.fields[0].type == .nested(package: "std_msgs", typeName: "Header"))
         #expect(ir.fields[1].type == .nested(package: "geometry_msgs", typeName: "Pose"))
     }
 
     @Test("translates fixed array IDL into FieldType.array")
-    func translatesArray() {
+    func translatesArray() throws {
         let idl = IDLFile(
             package: "unique_identifier_msgs",
             typeName: "UUID",
@@ -65,12 +65,12 @@ struct IRBuilderTests {
                 )
             ]
         )
-        let ir = IRBuilder.build(jazzy: idl)
+        let ir = try IRBuilder.build(jazzy: idl)
         #expect(ir.fields[0].type == .array(element: .primitive(.uint8), length: 16))
     }
 
     @Test("parses int default into DefaultValue.int")
-    func parsesIntDefault() {
+    func parsesIntDefault() throws {
         let idl = IDLFile(
             package: "fake_pkg",
             typeName: "Foo",
@@ -83,12 +83,12 @@ struct IRBuilderTests {
                 )
             ]
         )
-        let ir = IRBuilder.build(jazzy: idl)
+        let ir = try IRBuilder.build(jazzy: idl)
         #expect(ir.fields[0].defaultValue == .int(42))
     }
 
     @Test("parses array default into DefaultValue.array")
-    func parsesArrayDefault() {
+    func parsesArrayDefault() throws {
         let idl = IDLFile(
             package: "fake_pkg",
             typeName: "Foo",
@@ -101,7 +101,7 @@ struct IRBuilderTests {
                 )
             ]
         )
-        let ir = IRBuilder.build(jazzy: idl)
+        let ir = try IRBuilder.build(jazzy: idl)
         #expect(ir.fields[0].defaultValue == .array([.float(1.0), .float(2.0), .float(3.0)]))
     }
 
@@ -113,7 +113,7 @@ struct IRBuilderTests {
             fields: [],
             constants: [IDLConstant(name: "STATUS_UNKNOWN", type: .int8, value: "0", sourceLine: 1)]
         )
-        let ir = IRBuilder.build(jazzy: idl)
+        let ir = try IRBuilder.build(jazzy: idl)
         #expect(ir.constants[0].value == .int(0))
     }
 
@@ -126,13 +126,29 @@ struct IRBuilderTests {
             constants: [IDLConstant(name: "TOO_BIG", type: .int8, value: "200", sourceLine: 1)]
         )
         do {
-            _ = try IRBuilder.buildOrThrow(jazzy: idl)
+            _ = try IRBuilder.build(jazzy: idl)
             Issue.record("expected range-validation error")
         } catch let error as IRBuildError {
             #expect(error.message.contains("TOO_BIG"))
             #expect(error.message.contains("int8"))
+            #expect(error.line == 1)
         } catch {
             Issue.record("expected IRBuildError, got \(error)")
+        }
+    }
+
+    @Test("an invalid field default reports the field's line")
+    func invalidDefaultReportsLine() {
+        let idl = IDLFile(
+            package: "fake_pkg",
+            typeName: "Foo",
+            fields: [
+                IDLField(name: "ok", type: .primitive(.uint8), sourceLine: 2),
+                IDLField(name: "bad", type: .primitive(.uint8), defaultExpression: "300", sourceLine: 5),
+            ]
+        )
+        #expect(throws: IRBuildError("constant 'bad' value 300 out of range for uint8 (0...255)", line: 5)) {
+            _ = try IRBuilder.build(jazzy: idl)
         }
     }
 }
