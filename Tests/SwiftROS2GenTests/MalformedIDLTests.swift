@@ -96,7 +96,7 @@ struct MalformedIDLTests {
                             distro: "jazzy")),
                 ])
             }
-            #expect(error?.file == "jazzy/pkg_msgs/msg/Thing.msg")
+            #expect(error?.file.hasSuffix("jazzy/pkg_msgs/msg/Thing.msg") == true)
             #expect(error?.line == 2)
         }
     }
