@@ -50,7 +50,8 @@ struct WStringTests {
             Issue.record("expected GeneratorError.parse, got \(String(describing: error))")
             return
         }
-        #expect(error?.description == "\(location): wstring is not supported yet")
+        // The pipeline reports the IDL file by its path on disk, so match the tail.
+        #expect(error?.description.hasSuffix("\(location): wstring is not supported yet") == true)
         #expect(parseError.message == "wstring is not supported yet")
     }
 }
