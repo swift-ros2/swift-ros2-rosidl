@@ -79,9 +79,9 @@ public enum ModuleIdentifier {
 
 }
 
-/// Maps `<pkg>/msg/<TypeName>` → preferred Swift struct name. Lets the emitter use
-/// historic names like `UniqueIdentifierUUID` (which the rest of the codebase
-/// already imports) instead of the default collision-rule output.
+/// Maps `<pkg>/<kind>/<TypeName>` → Swift struct name, replacing the default
+/// ``SwiftEmitter/swiftStructName(typeName:)`` output (for example `UniqueIdentifierUUID`
+/// for `unique_identifier_msgs/msg/UUID`, which would otherwise be `UUID`).
 public typealias SwiftNameOverrides = [String: String]
 
 /// A single Swift source file produced by the generator.
@@ -127,11 +127,9 @@ extension Pipeline {
     /// no `typeInfo`). These types are embedded as fields inside other messages and
     /// are never advertised at the topic level.
     ///
-    /// NOTE: Phase 2 already emitted `BuiltinInterfaces/Time`, `GeometryMsgs/*`,
-    /// and `StdMsgs/Header` as full `ROS2Message` types. Marking them nested-only
-    /// here would silently regenerate them with a different conformance the next
-    /// time anyone runs the CLI against those packages, breaking every existing
-    /// caller. Keep this set restricted to the Phase 3 newcomers.
+    /// Types such as `builtin_interfaces/Time` or `std_msgs/Header` are also embedded, but they
+    /// are full `ROS2Message` types because they are published on their own too. Adding one
+    /// here would remove its `typeInfo` and `ROS2Message` conformance.
     public static let defaultNestedOnlyTypes: Set<String> = [
         "unique_identifier_msgs/msg/UUID",
         "action_msgs/msg/GoalInfo",
@@ -226,7 +224,7 @@ extension Pipeline {
             // Labels and the run of every entry come from the first run of the package.
             let primaryRun = pkgRuns[0]
             if pkgRuns.count == 1 {
-                // Single-distro fast path (Phase 1-3 behavior preserved).
+                // A package read for one distribution needs no merge.
                 for entry in try parsePackage(run: primaryRun) {
                     unresolvedIRs.append(
                         CollectedIR(
@@ -354,7 +352,7 @@ extension Pipeline {
     /// complete so cross-package references (e.g. `std_msgs/Header → builtin_interfaces/Time`)
     /// resolve regardless of the order packages appear in `runs`.
     ///
-    /// Phase 4: when two `runs` share the same `input.name` (typically because
+    /// When two `runs` share the same `input.name` (typically because
     /// the caller passed both a Humble and a Jazzy directory for the same
     /// package), the per-distro IDL files for each type are merged via
     /// ``IRBuilder/build(perDistro:)`` into a single distro-conditional IR.
@@ -443,7 +441,7 @@ extension Pipeline {
                     contents: swift
                 ))
         }
-        // Phase 3: emit one umbrella enum per parsed `.srv` so callers can use
+        // One umbrella enum per parsed `.srv` so callers can use
         // `<Service>Srv.Request` / `.Response` and read the canonical service-level
         // hashes from `typeInfo`. The umbrella reuses the per-half hashes that
         // already landed in the registry above.
@@ -457,9 +455,7 @@ extension Pipeline {
                 for: "jazzy", registry: c.registry)
             let requestStructName = c.nameOverrides[reqKey] ?? "\(svc.typeName)Request"
             let responseStructName = c.nameOverrides[resKey] ?? "\(svc.typeName)Response"
-            let umbrellaName =
-                Pipeline.defaultSwiftNameOverrides["\(svc.package)/srv/\(svc.typeName)"]
-                ?? "\(svc.typeName)Srv"
+            let umbrellaName = "\(svc.typeName)Srv"
             let umbrella = SwiftEmitter.emitServiceUmbrella(
                 package: svc.package,
                 serviceTypeName: svc.typeName,
@@ -479,7 +475,7 @@ extension Pipeline {
                     contents: umbrella
                 ))
         }
-        // Phase 6: emit one Swift file per parsed `.action`. Each file owns the
+        // One Swift file per parsed `.action`. Each file owns the
         // outer `<TypeName>Action` enum (with nested `Goal` / `Result` /
         // `Feedback`) plus the five sibling `<TypeName>_<Wrapper>` structs.
         // The action-level + wrapper hashes come from
@@ -666,10 +662,9 @@ extension Pipeline {
         return files
     }
 
-    /// Lightweight carrier for an as-parsed `.srv`: keeps the two halves' raw IDLFiles
-    /// so the umbrella emitter can recompute hashes if the post-hashing registry
-    /// lookup miscarries. The request / response halves themselves are emitted via
-    /// the regular message emission path; this struct only describes the umbrella.
+    /// Lightweight carrier for an as-parsed `.srv`: the two halves' IDLFiles, from which the
+    /// pipeline builds their IRs. The request / response halves are emitted via the regular
+    /// message emission path; the umbrella enum is emitted from this carrier.
     public struct ParsedService: Equatable, Sendable {
         public let package: String
         public let typeName: String
@@ -947,7 +942,7 @@ extension Pipeline {
         for (_, ir) in registry {
             for field in ir.fields {
                 guard let target = elementNestedReference(of: field.type) else { continue }
-                // Phase 6: a nested reference may resolve under msg, srv, or
+                // A nested reference may resolve under msg, srv, or
                 // action — accept the first kind found in the registry.
                 var resolved = false
                 for kind in MessageKind.allCases {

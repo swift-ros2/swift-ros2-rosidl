@@ -8,7 +8,7 @@ struct EmitterDistroConditionalTests {
     @Test("emits typeInfo(for:) + isLegacySchema branches for sensor_msgs/Range")
     func emitsConditionalRange() throws {
         // Hand-build the Range IR with `variance` as a jazzy-only field. The
-        // real Phase 4 pipeline parses common_interfaces; here we assert the
+        // pipeline merges per-distro IDL; here we assert the
         // emitter alone produces the canonical conditional shape.
         let header = FieldIR(
             ros2Name: "header", swiftName: "header",

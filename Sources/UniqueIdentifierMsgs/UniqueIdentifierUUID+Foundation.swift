@@ -1,15 +1,7 @@
-// Source-compat conveniences for the IDL-generated `UniqueIdentifierUUID`.
-// Mirrors the hand-written API surface that pre-dated the swift-ros2-gen
-// migration — keeps Conduit-style call sites that bridge to / from
-// `Foundation.UUID` compiling without churn.
+// Bridges between the generated `UniqueIdentifierUUID` and `Foundation.UUID`.
 //
-// The pre-migration struct enforced `uuid.count == 16` via a `precondition`
-// inside `init(uuid:)` and exposed `uuid` as `private(set)`. The generator
-// emits a public mutable property and no precondition. We do **not** restore
-// either guard here: invalid mutations now fail at encode/decode time with a
-// clear CDR error rather than aborting the process at construction. The
-// 16-element default in the generator's `init(uuid:)` keeps the common path
-// safe by construction.
+// `uuid` is a public mutable `[UInt8]` without a length check at construction; the
+// generated `init(uuid:)` defaults to 16 zero bytes, and `encode(to:)` checks the length.
 
 import Foundation
 import SwiftROS2Messages
@@ -26,9 +18,8 @@ extension UniqueIdentifierUUID {
     }
 
     /// Return the underlying 16 bytes as a `Foundation.UUID`. Reading this
-    /// when `uuid.count != 16` is a programming error and traps via an
-    /// out-of-bounds subscript — same effective contract as the original
-    /// hand-written precondition.
+    /// when `uuid.count < 16` is a programming error and traps via an
+    /// out-of-bounds subscript.
     public var foundationUUID: Foundation.UUID {
         Foundation.UUID(
             uuid: (

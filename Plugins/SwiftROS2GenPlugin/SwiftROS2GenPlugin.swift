@@ -1,9 +1,9 @@
-// Generated source: invokes the `swift-ros2-gen` executable on the
+// Build-tool plugin: invokes the `swift-ros2-gen` executable on the
 // host target's msg/ directory and emits one Swift file per .msg
 // input under the plugin's per-target work directory.
 //
-// Naming rule mirrored from SwiftROS2Gen.Pipeline / SwiftEmitter
-// (Phase 2+): the per-package directory is PascalCase(package); the
+// Naming rule mirrored from SwiftROS2Gen.Pipeline / SwiftEmitter:
+// the per-package directory is PascalCase(package); the
 // per-type filename is the bare PascalCase type name, with a trailing
 // `Msg` only when the type collides with a Swift stdlib name or a
 // common Swift/Foundation type (Bool, String, Int, Int8..Int64, UInt,

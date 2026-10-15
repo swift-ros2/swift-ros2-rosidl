@@ -74,10 +74,9 @@ public struct OracleClient: Sendable {
             // who installed Docker in a non-standard location (Homebrew,
             // CoreOS, etc.) still gets PATH lookup. Windows hosts don't have
             // `/usr/bin/env`, so resolve the bare `docker.exe` and let the OS
-            // PATH search find it. The Verify family is part of the Windows
-            // build graph (Zenoh-only target builds it as a dependency of
-            // SwiftROS2Gen) so the `#if os(Windows)` branch matters even
-            // though no Windows CI job exercises the verifier today.
+            // PATH search find it. SwiftROS2Gen builds on Windows, so the
+            // `#if os(Windows)` branch must compile even though no Windows CI
+            // job runs the verifier.
             #if os(Windows)
                 process.executableURL = URL(fileURLWithPath: "docker.exe")
                 process.arguments = ["run", "--rm", dockerImage] + arguments

@@ -414,8 +414,8 @@ public enum SwiftEmitter {
     /// Find the override-map key for a nested reference. Tries each
     /// ``MessageKind`` raw value (`msg`, `srv`, `action`) so callers can store
     /// overrides keyed by the actual canonical ROS type name regardless of the
-    /// referenced type's family. Falls back to the historical `<pkg>/msg/<Type>`
-    /// key when no kind matches — preserves Phases 1-5 behavior.
+    /// referenced type's family. Falls back to the `<pkg>/msg/<Type>` key when no
+    /// kind matches.
     static func nestedOverrideKey(
         package: String,
         typeName: String,
@@ -431,9 +431,8 @@ public enum SwiftEmitter {
     }
 
     /// Convention: append `Msg` only when the type name collides with a Swift stdlib name
-    /// (or `Empty`, kept for ROS-conventional symmetry with Phase 1). Anything else emits
-    /// as bare PascalCase. All generated types coexist in the `SwiftROS2Messages` Swift
-    /// module so the bare name is unambiguous.
+    /// (or a common Swift / Foundation type such as `Empty`, `Duration` or `Range`).
+    /// Anything else emits as bare PascalCase.
     public static func swiftStructName(typeName: String) -> String {
         collisionTypeNames.contains(typeName) ? typeName + "Msg" : typeName
     }

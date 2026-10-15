@@ -183,7 +183,7 @@ struct ParserTests {
         }
     }
 
-    @Test("parses an unbounded same-package nested sequence (formerly Phase 3 territory)")
+    @Test("parses an unbounded same-package nested sequence")
     func parsesSamePackageNestedSequence() throws {
         let file = try Parser.parseMessage(
             source: "Vector3[] points\n", file: "Polygon.msg", package: "geometry_msgs", typeName: "Polygon"

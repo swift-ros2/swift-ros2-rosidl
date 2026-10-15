@@ -4,10 +4,7 @@ import Testing
 
 @Suite("RIHS01 golden hashes for std_msgs primitives")
 struct HashGoldenTests {
-    /// These hashes are copied verbatim from the existing
-    /// `Sources/SwiftROS2Messages/BuiltinMessages/StdMsgs/StdMsgs.swift`,
-    /// which were authored from `ros2 interface show --type-description-hashes`
-    /// against ROS 2 jazzy. They are the source of truth for Phase 1.
+    /// Authored from `ros2 interface show --type-description-hashes` against ROS 2 jazzy.
     static let golden: [(typeName: String, primitive: PrimitiveType?, hash: String)] = [
         (
             "Bool", .bool,
@@ -351,8 +348,8 @@ struct RangePerDistroHashTests {
         ]
     }
 
-    /// Range with `variance` annotated as `.onlyIn(["jazzy"])` — the canary
-    /// that Phase 4 is set up to handle.
+    /// Range with `variance` annotated as `.onlyIn(["jazzy"])`, a field only some
+    /// distributions have.
     static func rangeIR() -> MessageIR {
         return MessageIR(
             package: "sensor_msgs", typeName: "Range",

@@ -1,4 +1,4 @@
-// Phase-7 smoke target: depends on SwiftROS2GenPlugin to generate a
+// Smoke target of the build plugin: depends on SwiftROS2GenPlugin to generate a
 // Swift wrapper for the local msg/Bool.msg at build time, then prints
 // the resulting type's `typeInfo.typeName`. A non-empty stdout proves
 // the plugin invoked the CLI and the build dependency on the generated

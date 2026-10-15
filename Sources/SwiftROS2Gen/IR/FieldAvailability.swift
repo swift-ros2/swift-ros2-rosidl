@@ -1,6 +1,6 @@
 /// Tracks which ROS 2 distros define a particular field of a merged message.
 ///
-/// `SwiftROS2Gen` does not depend on `SwiftROS2Wire`, so distro names are
+/// `SwiftROS2Gen` does not depend on `SwiftROS2Messages`, so distro names are
 /// raw strings (the values of `IRBuilder.distroOrder`) rather than the
 /// `ROS2Distro` enum. The runtime side maps these to `ROS2Distro` when
 /// emitting `typeInfo(for:)` switches.

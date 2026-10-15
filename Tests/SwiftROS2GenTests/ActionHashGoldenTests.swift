@@ -2,7 +2,7 @@ import Testing
 
 @testable import SwiftROS2Gen
 
-@Suite("RIHS01 action hashes — Phase 6 golden")
+@Suite("RIHS01 action hashes — golden")
 struct ActionHashGoldenTests {
 
     /// Build the minimal extra registry needed to resolve the wrapper-level

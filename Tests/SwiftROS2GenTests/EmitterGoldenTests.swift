@@ -56,7 +56,7 @@ struct EmitterGoldenTests {
     }
 }
 
-@Suite("SwiftEmitter golden output — Phase 2 nested types")
+@Suite("SwiftEmitter golden output — nested types")
 struct EmitterNestedGoldenTests {
     @Test("emits Vector3 (no nested deps)")
     func emitsVector3() throws {
