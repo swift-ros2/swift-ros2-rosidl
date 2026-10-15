@@ -97,6 +97,16 @@ public struct GeneratedFile: Equatable, Sendable {
 
 /// Orchestrates parsing, IR building, hashing, and emission for a ROS 2 package.
 public enum Pipeline {
+    /// Runs an IR build of the IDL file labelled `file`, reporting an ``IRBuildError`` as a
+    /// ``GeneratorError/parse(_:)`` at the line it is about.
+    static func buildIR<T>(file: String, _ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch let error as IRBuildError {
+            throw GeneratorError.parse(ParseError(file: file, line: error.line ?? 1, message: error.message))
+        }
+    }
+
     static func pascal(_ snake: String) -> String {
         snake.split(separator: "_").map {
             $0.prefix(1).uppercased() + $0.dropFirst().lowercased()
@@ -243,9 +253,10 @@ extension Pipeline {
             for (svc, distros) in services {
                 let label = sourceLabelFor(run: primaryRun, typeName: svc.typeName, kind: .srv)
                 for half in [svc.requestIDL, svc.responseIDL] {
+                    let ir = try buildIR(file: label) { try IRBuilder.build(jazzy: half, kind: .srv) }
                     unresolvedIRs.append(
                         CollectedIR(
-                            ir: IRBuilder.build(jazzy: half, kind: .srv), sourceLabel: label,
+                            ir: ir, sourceLabel: label,
                             topLevelTypeName: svc.typeName, distros: distros))
                 }
             }
@@ -852,7 +863,7 @@ extension Pipeline {
                     package: run.input.name,
                     typeName: typeName
                 )
-                let ir = IRBuilder.build(jazzy: idl)
+                let ir = try buildIR(file: label) { try IRBuilder.build(jazzy: idl) }
                 parsed.append(ParsedEntry(ir: ir, sourceLabel: label, distros: [run.input.distro]))
             } catch let err as ParseError {
                 throw GeneratorError.parse(err)
@@ -1015,6 +1026,9 @@ extension Pipeline {
                         package: packageName,
                         typeName: typeName
                     )
+                    // Validate each distribution's defaults and constants against its own file,
+                    // so an error names the file and line it comes from.
+                    _ = try buildIR(file: label) { try IRBuilder.build(jazzy: idl) }
                     if idlsByType[typeName] == nil { typeOrder.append(typeName) }
                     idlsByType[typeName, default: [:]][run.input.distro] = idl
                 } catch let err as ParseError {
@@ -1101,7 +1115,7 @@ extension Pipeline {
 
     /// Enumerate `<pkg>/action/*.action` for the run, parse each into the
     /// three user-defined blocks + five synthesized wrappers via
-    /// ``IRBuilder/build(jazzy:)``, and return them as ``ParsedAction``
+    /// `IRBuilder.build(jazzy:)`, and return them as ``ParsedAction``
     /// carriers. Returns an empty array when the package has no `action/`
     /// subdirectory at all (the common case for pure message / service
     /// packages). The same `typesAllowList` filter applies as for messages —
@@ -1137,7 +1151,7 @@ extension Pipeline {
                     package: run.input.name,
                     typeName: typeName
                 )
-                let ir = IRBuilder.build(jazzy: idl)
+                let ir = try buildIR(file: label) { try IRBuilder.build(jazzy: idl) }
                 out.append(
                     ParsedAction(
                         package: run.input.name,

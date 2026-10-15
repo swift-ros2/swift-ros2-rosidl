@@ -16,7 +16,7 @@ struct ActionIRBuilderTests {
 
     @Test("builds Goal/Result/Feedback IRs with kind .action")
     func userDefinedIRsCarryActionKind() throws {
-        let ir = IRBuilder.build(jazzy: try fibonacciIDL())
+        let ir = try IRBuilder.build(jazzy: try fibonacciIDL())
         #expect(ir.goal.kind == .action)
         #expect(ir.result.kind == .action)
         #expect(ir.feedback.kind == .action)
@@ -27,7 +27,7 @@ struct ActionIRBuilderTests {
 
     @Test("synthesizes all 5 wrapper IRs with kind .action")
     func synthesizesWrappers() throws {
-        let ir = IRBuilder.build(jazzy: try fibonacciIDL())
+        let ir = try IRBuilder.build(jazzy: try fibonacciIDL())
         #expect(ir.sendGoalRequest.typeName == "Fibonacci_SendGoal_Request")
         #expect(ir.sendGoalResponse.typeName == "Fibonacci_SendGoal_Response")
         #expect(ir.getResultRequest.typeName == "Fibonacci_GetResult_Request")
@@ -42,7 +42,7 @@ struct ActionIRBuilderTests {
 
     @Test("SendGoal_Request = goal_id (UUID) + nested goal (action/_Goal)")
     func sendGoalRequestShape() throws {
-        let ir = IRBuilder.build(jazzy: try fibonacciIDL())
+        let ir = try IRBuilder.build(jazzy: try fibonacciIDL())
         let fields = ir.sendGoalRequest.fields
         #expect(fields.count == 2)
         #expect(fields[0].ros2Name == "goal_id")
@@ -63,7 +63,7 @@ struct ActionIRBuilderTests {
 
     @Test("SendGoal_Response = bool accepted + builtin_interfaces/Time stamp")
     func sendGoalResponseShape() throws {
-        let ir = IRBuilder.build(jazzy: try fibonacciIDL())
+        let ir = try IRBuilder.build(jazzy: try fibonacciIDL())
         let fields = ir.sendGoalResponse.fields
         #expect(fields.count == 2)
         #expect(fields[0].ros2Name == "accepted")
@@ -79,14 +79,14 @@ struct ActionIRBuilderTests {
 
     @Test("GetResult_Request = goal_id only")
     func getResultRequestShape() throws {
-        let ir = IRBuilder.build(jazzy: try fibonacciIDL())
+        let ir = try IRBuilder.build(jazzy: try fibonacciIDL())
         #expect(ir.getResultRequest.fields.count == 1)
         #expect(ir.getResultRequest.fields[0].ros2Name == "goal_id")
     }
 
     @Test("GetResult_Response = int8 status + nested result")
     func getResultResponseShape() throws {
-        let ir = IRBuilder.build(jazzy: try fibonacciIDL())
+        let ir = try IRBuilder.build(jazzy: try fibonacciIDL())
         let fields = ir.getResultResponse.fields
         #expect(fields.count == 2)
         #expect(fields[0].ros2Name == "status")
@@ -102,7 +102,7 @@ struct ActionIRBuilderTests {
 
     @Test("FeedbackMessage = goal_id + nested feedback")
     func feedbackMessageShape() throws {
-        let ir = IRBuilder.build(jazzy: try fibonacciIDL())
+        let ir = try IRBuilder.build(jazzy: try fibonacciIDL())
         let fields = ir.feedbackMessage.fields
         #expect(fields.count == 2)
         #expect(fields[0].ros2Name == "goal_id")

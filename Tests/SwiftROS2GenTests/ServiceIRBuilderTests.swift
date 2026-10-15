@@ -17,8 +17,8 @@ struct ServiceIRBuilderTests {
             package: "std_srvs",
             typeName: "SetBool"
         )
-        let request = IRBuilder.build(jazzy: svc.request, kind: .srv)
-        let response = IRBuilder.build(jazzy: svc.response, kind: .srv)
+        let request = try IRBuilder.build(jazzy: svc.request, kind: .srv)
+        let response = try IRBuilder.build(jazzy: svc.response, kind: .srv)
         #expect(request.package == "std_srvs")
         #expect(request.typeName == "SetBool_Request")
         #expect(request.kind == .srv)
@@ -38,8 +38,8 @@ struct ServiceIRBuilderTests {
             package: "std_srvs",
             typeName: "Empty"
         )
-        let request = IRBuilder.build(jazzy: svc.request, kind: .srv)
-        let response = IRBuilder.build(jazzy: svc.response, kind: .srv)
+        let request = try IRBuilder.build(jazzy: svc.request, kind: .srv)
+        let response = try IRBuilder.build(jazzy: svc.response, kind: .srv)
         #expect(request.fields.isEmpty)
         #expect(response.fields.isEmpty)
         #expect(request.kind == .srv)

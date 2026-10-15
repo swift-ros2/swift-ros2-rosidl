@@ -2,15 +2,16 @@ import Foundation
 
 /// Transforms a parsed ``IDLFile`` into the distro-neutral ``MessageIR`` used by the emitter.
 public enum IRBuilder {
-    /// Throwing build path. Translates the parser AST into the IR, parses every
-    /// field default expression into a typed ``DefaultValue``, and validates
-    /// constants (range-checks integers, parses bools, etc.). Surfaces every
-    /// validation issue as ``IRBuildError``.
-    public static func buildOrThrow(jazzy idl: IDLFile, kind: MessageKind = .msg) throws -> MessageIR {
+    /// Builds the IR of one parsed IDL file: lifts the parser AST, parses every field default
+    /// into a typed ``DefaultValue`` and validates every constant (integer ranges, bool
+    /// literals and the like).
+    ///
+    /// - Throws: ``IRBuildError`` carrying the IDL line of the offending field or constant.
+    public static func build(jazzy idl: IDLFile, kind: MessageKind = .msg) throws -> MessageIR {
         let fields = try idl.fields.map { f -> FieldIR in
             let irType = lift(f.type, currentPackage: idl.package)
-            let dv = try f.defaultExpression.map {
-                try parseDefault($0, for: irType, fieldName: f.name)
+            let dv = try f.defaultExpression.map { expr in
+                try atLine(f.sourceLine) { try parseDefault(expr, for: irType, fieldName: f.name) }
             }
             return FieldIR(
                 ros2Name: f.name,
@@ -20,7 +21,7 @@ public enum IRBuilder {
             )
         }
         let constants = try idl.constants.map { c -> ConstantIR in
-            let dv = try parseConstantValue(c.value, type: c.type, name: c.name)
+            let dv = try atLine(c.sourceLine) { try parseConstantValue(c.value, type: c.type, name: c.name) }
             return ConstantIR(ros2Name: c.name, swiftName: c.name, type: c.type, value: dv)
         }
         return MessageIR(
@@ -32,15 +33,12 @@ public enum IRBuilder {
         )
     }
 
-    /// Back-compat non-throwing entry point. Existing callers (Pipeline) still
-    /// invoke this; range / shape errors trip a `preconditionFailure`. Task 9 /
-    /// Task 11 will move callers to ``buildOrThrow(jazzy:)`` so errors propagate
-    /// as ``GeneratorError``.
-    public static func build(jazzy idl: IDLFile, kind: MessageKind = .msg) -> MessageIR {
+    /// Runs `body`, giving an ``IRBuildError`` it throws the IDL `line` it is about.
+    static func atLine<T>(_ line: Int, _ body: () throws -> T) throws -> T {
         do {
-            return try buildOrThrow(jazzy: idl, kind: kind)
-        } catch {
-            preconditionFailure("IRBuilder.build hit \(error) — use buildOrThrow")
+            return try body()
+        } catch let error as IRBuildError where error.line == nil {
+            throw IRBuildError(error.message, line: line)
         }
     }
 
@@ -229,10 +227,12 @@ extension IRBuilder {
     /// `<typeName>_FeedbackMessage` (UUID `goal_id` + nested `<typeName>_Feedback`).
     /// All eight resulting IRs carry ``MessageKind/action`` so their canonical
     /// ROS type name renders with the `action/` segment.
-    public static func build(jazzy idl: IDLAction) -> ActionIR {
-        let goal = build(jazzy: idl.goal, kind: .action)
-        let result = build(jazzy: idl.result, kind: .action)
-        let feedback = build(jazzy: idl.feedback, kind: .action)
+    ///
+    /// - Throws: ``IRBuildError`` when a block has an invalid default or constant.
+    public static func build(jazzy idl: IDLAction) throws -> ActionIR {
+        let goal = try build(jazzy: idl.goal, kind: .action)
+        let result = try build(jazzy: idl.result, kind: .action)
+        let feedback = try build(jazzy: idl.feedback, kind: .action)
 
         let wrappers = synthesizeActionWrappers(
             actionPackage: idl.package,
@@ -422,7 +422,14 @@ extension IRBuilder {
 /// An error produced by ``IRBuilder`` while validating defaults / constants.
 public struct IRBuildError: Error, CustomStringConvertible, Equatable, Sendable {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    /// The 1-based IDL line of the field or constant the error is about, when known.
+    public let line: Int?
+
+    public init(_ message: String, line: Int? = nil) {
+        self.message = message
+        self.line = line
+    }
+
     public var description: String { message }
 }
 
@@ -514,8 +521,8 @@ extension IRBuilder {
                     fieldTypeByName[f.name] = irType
                     fieldOrder.append(f.name)
                 }
-                let dv = try f.defaultExpression.map {
-                    try parseDefault($0, for: irType, fieldName: f.name)
+                let dv = try f.defaultExpression.map { expr in
+                    try atLine(f.sourceLine) { try parseDefault(expr, for: irType, fieldName: f.name) }
                 }
                 latestFieldByName[f.name] = (dv, snakeToCamel(f.name))
                 presenceByName[f.name, default: []].insert(distro)
@@ -554,7 +561,7 @@ extension IRBuilder {
         for distro in orderedDistros {
             let idl = idls[distro]!
             for c in idl.constants {
-                let dv = try parseConstantValue(c.value, type: c.type, name: c.name)
+                let dv = try atLine(c.sourceLine) { try parseConstantValue(c.value, type: c.type, name: c.name) }
                 let cir = ConstantIR(
                     ros2Name: c.name, swiftName: c.name, type: c.type, value: dv)
                 if constantsByName[c.name] == nil {
