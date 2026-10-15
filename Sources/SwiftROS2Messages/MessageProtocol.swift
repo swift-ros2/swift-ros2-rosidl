@@ -181,6 +181,9 @@ public enum CDRSerializationError: Error, LocalizedError, Equatable, Sendable {
     case invalidArrayLength(field: String, expected: Int, actual: Int)
     /// A bounded sequence field (`T[<=N]`) holds more than `N` elements.
     case sequenceTooLong(field: String, maximum: Int, actual: Int)
+    /// A bounded string field (`string<=N`, or an element of an array or sequence of them) holds
+    /// more than `N` UTF-8 bytes, which is how rosidl counts the bound.
+    case stringTooLong(field: String, maximum: Int, actual: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -188,6 +191,8 @@ public enum CDRSerializationError: Error, LocalizedError, Equatable, Sendable {
             return "Field '\(field)' is a fixed-size array of \(expected) elements but holds \(actual)"
         case .sequenceTooLong(let field, let maximum, let actual):
             return "Field '\(field)' is a sequence of at most \(maximum) elements but holds \(actual)"
+        case .stringTooLong(let field, let maximum, let actual):
+            return "Field '\(field)' is a string of at most \(maximum) bytes but holds \(actual)"
         }
     }
 }

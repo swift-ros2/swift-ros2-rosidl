@@ -655,7 +655,7 @@ public enum SwiftEmitter {
                 "                field: \"\(field.swiftName)\", expected: \(length), actual: \(field.swiftName).count)\n"
             out += "        }\n"
             out += "        for v in \(field.swiftName) {\n"
-            out += "            \(elementEncodeStmt(element, value: "v"))\n"
+            out += elementEncodeLines(element, value: "v", field: field.swiftName, indent: "            ")
             out += "        }\n"
             return out
         case .sequence(let element, let upperBound):
@@ -680,11 +680,12 @@ public enum SwiftEmitter {
             }
             out += "        encoder.writeUInt32(UInt32(\(field.swiftName).count))\n"
             out += "        for v in \(field.swiftName) {\n"
-            out += "            \(elementEncodeStmt(element, value: "v"))\n"
+            out += elementEncodeLines(element, value: "v", field: field.swiftName, indent: "            ")
             out += "        }\n"
             return out
         case .boundedString:
-            return "        encoder.writeString(\(field.swiftName))\n"
+            return elementEncodeLines(
+                field.type, value: field.swiftName, field: field.swiftName, indent: "        ")
         }
     }
 
@@ -738,8 +739,8 @@ public enum SwiftEmitter {
             out += "            self.\(field.swiftName) = out\n"
             out += "        }\n"
             return out
-        case .boundedString:
-            return "        self.\(field.swiftName) = try decoder.readString()\n"
+        case .boundedString(_, let upper):
+            return "        self.\(field.swiftName) = try decoder.readString(maxLength: \(upper))\n"
         }
     }
 
@@ -753,17 +754,30 @@ public enum SwiftEmitter {
         return false
     }
 
-    /// Encode a single element of an array / sequence.
-    static func elementEncodeStmt(_ element: FieldType, value: String) -> String {
+    /// Encode a single value (a primitive, nested message or bounded string field, or one element
+    /// of an array / sequence) as statements at `indent`, one per line. A bounded string is
+    /// checked against its bound in UTF-8 bytes first, as rosidl counts it.
+    static func elementEncodeLines(
+        _ element: FieldType, value: String, field: String, indent: String
+    ) -> String {
+        let lines: [String]
         switch element {
         case .primitive:
-            return "encoder.\(writerCall(element))(\(value))"
+            lines = ["encoder.\(writerCall(element))(\(value))"]
         case .nested:
-            return "try \(value).encode(to: encoder)"
-        case .array, .sequence, .boundedString:
-            preconditionFailure(
-                "SwiftEmitter: nested array/sequence/boundedString elements are not supported")
+            lines = ["try \(value).encode(to: encoder)"]
+        case .boundedString(_, let upper):
+            lines = [
+                "guard \(value).utf8.count <= \(upper) else {",
+                "    throw CDRSerializationError.stringTooLong(",
+                "        field: \"\(field)\", maximum: \(upper), actual: \(value).utf8.count)",
+                "}",
+                "encoder.writeString(\(value))",
+            ]
+        case .array, .sequence:
+            preconditionFailure("SwiftEmitter: nested array/sequence elements are not supported")
         }
+        return lines.map { "\(indent)\($0)\n" }.joined()
     }
 
     /// Decode a single element of an array / sequence into an `.append(...)` argument.
@@ -775,9 +789,10 @@ public enum SwiftEmitter {
             let key = nestedOverrideKey(package: pkg, typeName: typeName, in: nestedNameOverrides)
             let n = nestedNameOverrides[key] ?? swiftStructName(typeName: typeName)
             return "try \(n)(from: decoder)"
-        case .array, .sequence, .boundedString:
-            preconditionFailure(
-                "SwiftEmitter: nested array/sequence/boundedString elements are not supported")
+        case .boundedString(_, let upper):
+            return "try decoder.readString(maxLength: \(upper))"
+        case .array, .sequence:
+            preconditionFailure("SwiftEmitter: nested array/sequence elements are not supported")
         }
     }
 

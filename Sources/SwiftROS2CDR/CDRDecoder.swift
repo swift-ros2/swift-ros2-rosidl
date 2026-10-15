@@ -12,6 +12,7 @@ public enum CDRDecodingError: Error, LocalizedError {
     case byteSequenceTooLarge(bytes: UInt32, max: Int)
     case stringTooLarge(length: UInt32, max: Int)
     case missingStringNullTerminator
+    case boundedStringTooLong(bytes: UInt32, max: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -29,6 +30,8 @@ public enum CDRDecodingError: Error, LocalizedError {
             return "CDR string declares length \(length) which exceeds maximum \(max)"
         case .missingStringNullTerminator:
             return "CDR string is missing its trailing null terminator"
+        case .boundedStringTooLong(let bytes, let max):
+            return "CDR string holds \(bytes) bytes which exceeds its bound of \(max)"
         }
     }
 }
@@ -160,7 +163,22 @@ public final class CDRDecoder {
 
     /// Read a CDR string (uint32 length including null + chars + null byte)
     public func readString() throws -> String {
+        try readStringBody(length: try readUInt32())
+    }
+
+    /// Read a bounded string (`string<=N`). `maxLength` is the IDL bound `N` in UTF-8 bytes,
+    /// without the trailing null, as rosidl counts it. A string that declares more bytes throws
+    /// ``CDRDecodingError/boundedStringTooLong(bytes:max:)`` before its payload is read.
+    public func readString(maxLength: Int) throws -> String {
         let length = try readUInt32()
+        // `length` counts the trailing null, which the bound does not.
+        if length > 0, Int(length) - 1 > maxLength {
+            throw CDRDecodingError.boundedStringTooLong(bytes: length - 1, max: maxLength)
+        }
+        return try readStringBody(length: length)
+    }
+
+    private func readStringBody(length: UInt32) throws -> String {
         guard length > 0 else {
             // Non-standard but tolerated: length == 0 is treated as an empty
             // string. `CDREncoder.writeString` always emits length >= 1 with a
