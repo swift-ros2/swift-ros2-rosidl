@@ -174,20 +174,20 @@ public protocol ROS2Action: Sendable {
 
 // MARK: - CDR Serialization Errors
 
-/// Errors thrown during CDR encoding or decoding of ROS 2 message payloads.
-public enum CDRSerializationError: Error, LocalizedError {
-    case invalidCovarianceArraySize(expected: Int, actual: Int)
-    case serializationFailed(String)
-    case bufferOverflow
+/// Errors thrown by a generated `encode(to:)` when a field holds a value its IDL type cannot
+/// carry, such as a fixed-size array of the wrong length. The message cannot be encoded.
+public enum CDRSerializationError: Error, LocalizedError, Equatable, Sendable {
+    /// A fixed-size array field (`T[N]`) holds a number of elements other than `N`.
+    case invalidArrayLength(field: String, expected: Int, actual: Int)
+    /// A bounded sequence field (`T[<=N]`) holds more than `N` elements.
+    case sequenceTooLong(field: String, maximum: Int, actual: Int)
 
     public var errorDescription: String? {
         switch self {
-        case .invalidCovarianceArraySize(let expected, let actual):
-            return "Invalid covariance array size: expected \(expected), got \(actual)"
-        case .serializationFailed(let message):
-            return "Serialization failed: \(message)"
-        case .bufferOverflow:
-            return "Buffer overflow during serialization"
+        case .invalidArrayLength(let field, let expected, let actual):
+            return "Field '\(field)' is a fixed-size array of \(expected) elements but holds \(actual)"
+        case .sequenceTooLong(let field, let maximum, let actual):
+            return "Field '\(field)' is a sequence of at most \(maximum) elements but holds \(actual)"
         }
     }
 }

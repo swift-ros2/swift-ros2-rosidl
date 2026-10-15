@@ -49,18 +49,18 @@ public struct ParameterDescriptor: ROS2Message, Equatable, Sendable {
         encoder.writeString(additionalConstraints)
         encoder.writeBool(readOnly)
         encoder.writeBool(dynamicTyping)
-        precondition(
-            floatingPointRange.count <= 1,
-            "floatingPointRange bounded sequence may not exceed 1 elements"
-        )
+        guard floatingPointRange.count <= 1 else {
+            throw CDRSerializationError.sequenceTooLong(
+                field: "floatingPointRange", maximum: 1, actual: floatingPointRange.count)
+        }
         encoder.writeUInt32(UInt32(floatingPointRange.count))
         for v in floatingPointRange {
             try v.encode(to: encoder)
         }
-        precondition(
-            integerRange.count <= 1,
-            "integerRange bounded sequence may not exceed 1 elements"
-        )
+        guard integerRange.count <= 1 else {
+            throw CDRSerializationError.sequenceTooLong(
+                field: "integerRange", maximum: 1, actual: integerRange.count)
+        }
         encoder.writeUInt32(UInt32(integerRange.count))
         for v in integerRange {
             try v.encode(to: encoder)

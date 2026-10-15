@@ -13,10 +13,10 @@ public struct UniqueIdentifierUUID: CDRCodable, Equatable, Sendable {
     }
 
     public func encode(to encoder: CDREncoder) throws {
-        precondition(
-            uuid.count == 16,
-            "uuid requires exactly 16 elements"
-        )
+        guard uuid.count == 16 else {
+            throw CDRSerializationError.invalidArrayLength(
+                field: "uuid", expected: 16, actual: uuid.count)
+        }
         for v in uuid {
             encoder.writeUInt8(v)
         }

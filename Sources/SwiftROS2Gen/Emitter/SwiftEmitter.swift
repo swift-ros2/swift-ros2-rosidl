@@ -646,25 +646,27 @@ public enum SwiftEmitter {
         case .nested:
             return "        try \(field.swiftName).encode(to: encoder)\n"
         case .array(let element, let length):
-            // Fixed array: enforce caller-supplied length matches the IDL bound,
-            // then per-element loop with no length prefix on the wire.
-            var out = "        precondition(\n"
-            out += "            \(field.swiftName).count == \(length),\n"
-            out += "            \"\(field.swiftName) requires exactly \(length) elements\"\n"
-            out += "        )\n"
+            // Fixed array: reject a value whose length is not the IDL length, then a
+            // per-element loop with no length prefix on the wire.
+            var out = "        guard \(field.swiftName).count == \(length) else {\n"
+            out += "            throw CDRSerializationError.invalidArrayLength(\n"
+            out +=
+                "                field: \"\(field.swiftName)\", expected: \(length), actual: \(field.swiftName).count)\n"
+            out += "        }\n"
             out += "        for v in \(field.swiftName) {\n"
             out += "            \(elementEncodeStmt(element, value: "v"))\n"
             out += "        }\n"
             return out
         case .sequence(let element, let upperBound):
             // Sequence: explicit uint32 length prefix, then per-element loop.
-            // Bounded sequences enforce the IDL upper bound at encode time.
+            // Bounded sequences reject a value longer than the IDL upper bound.
             var out = ""
             if let upper = upperBound {
-                out += "        precondition(\n"
-                out += "            \(field.swiftName).count <= \(upper),\n"
-                out += "            \"\(field.swiftName) bounded sequence may not exceed \(upper) elements\"\n"
-                out += "        )\n"
+                out += "        guard \(field.swiftName).count <= \(upper) else {\n"
+                out += "            throw CDRSerializationError.sequenceTooLong(\n"
+                out +=
+                    "                field: \"\(field.swiftName)\", maximum: \(upper), actual: \(field.swiftName).count)\n"
+                out += "        }\n"
             }
             // Byte-payload fast path: a sequence of `uint8` / `byte` is the
             // largest payload in many sensor messages (e.g. `CompressedImage`,
@@ -720,7 +722,7 @@ public enum SwiftEmitter {
             out += "            let count = try decoder.readSequenceCount()\n"
             // Bounded sequences: reject wire payloads exceeding the IDL upper
             // bound so on-the-wire data can't decode into an out-of-spec value.
-            // Mirrors the encoder-side precondition.
+            // Mirrors the encoder-side check.
             if let upper = upperBound {
                 out += "            guard count <= \(upper) else {\n"
                 out +=
