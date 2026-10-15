@@ -105,6 +105,7 @@ public enum Parser {
             }
 
             let fieldType = try parseTypeToken(typeToken, file: file, line: lineNumber)
+            try rejectWString(fieldType, file: file, line: lineNumber)
             try validateFieldName(nameToken, file: file, line: lineNumber)
             fields.append(
                 IDLField(
@@ -384,6 +385,20 @@ public enum Parser {
                 line: line,
                 message: "'<=' suffix only valid on string/wstring; got '\(head)'"
             )
+        }
+    }
+
+    /// Reject a field type that is, or holds, a `wstring`. rosidl encodes it as UTF-16 code units
+    /// with a layout that differs between RMWs; generating the UTF-8 `string` encoding instead
+    /// would produce messages no RMW accepts.
+    static func rejectWString(_ type: IDLFieldType, file: String, line: Int) throws {
+        switch type {
+        case .primitive(.wstring), .boundedString(isWide: true, _):
+            throw ParseError(file: file, line: line, message: "wstring is not supported yet")
+        case .primitive, .boundedString, .nested:
+            return
+        case .array(let element, _), .sequence(let element, _):
+            try rejectWString(element, file: file, line: line)
         }
     }
 
