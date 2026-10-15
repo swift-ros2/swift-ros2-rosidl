@@ -15,4 +15,6 @@ import Foundation
 import SwiftROS2CDR
 import SwiftROS2Messages
 
+// Bool gets the `Msg` suffix and Point2 does not: the plugin must predict both file names.
 print("PluginSmoke: BoolMsg.typeInfo.typeName = \(BoolMsg.typeInfo.typeName)")
+print("PluginSmoke: Point2.typeInfo.typeName = \(Point2.typeInfo.typeName)")

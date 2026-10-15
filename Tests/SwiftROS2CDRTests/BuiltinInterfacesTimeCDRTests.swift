@@ -33,4 +33,19 @@ final class BuiltinInterfacesTimeCDRTests: XCTestCase {
             ])
         )
     }
+
+    func testBuiltinInterfacesTimeIsTime() {
+        XCTAssertTrue(BuiltinInterfacesTime.self == Time.self)
+        XCTAssertEqual(BuiltinInterfacesTime.typeInfo.typeName, "builtin_interfaces/msg/Time")
+    }
+
+    func testNowReadsTheWallClock() {
+        let before = Date().timeIntervalSince1970
+        let t = Time.now()
+        let after = Date().timeIntervalSince1970
+        let seconds = Double(t.sec) + Double(t.nanosec) / 1_000_000_000
+        XCTAssertGreaterThanOrEqual(seconds, before.rounded(.down))
+        XCTAssertLessThanOrEqual(seconds, after)
+        XCTAssertLessThan(t.nanosec, 1_000_000_000)
+    }
 }
