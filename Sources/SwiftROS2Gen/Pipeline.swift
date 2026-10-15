@@ -1006,8 +1006,8 @@ extension Pipeline {
                     source: source.contents, file: source.url.path, package: run.input.name,
                     typeName: source.typeName)
             }
-            return ParsedAction(
-                package: run.input.name, typeName: source.typeName, actionIR: try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) })
+            let ir = try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) }
+            return ParsedAction(package: run.input.name, typeName: source.typeName, actionIR: ir)
         }
     }
 }
