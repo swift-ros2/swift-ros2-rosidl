@@ -109,7 +109,9 @@ jobs:
       - name: Generate DocC
         run: |
           swift package generate-documentation \
+            --target SwiftROS2CDR \
             --target SwiftROS2Messages \
+            --target SwiftROS2Gen \
             --target BuiltinInterfaces \
             --target UniqueIdentifierMsgs \
             --target ActionMsgs \

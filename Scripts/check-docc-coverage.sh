@@ -1,28 +1,15 @@
 #!/usr/bin/env bash
 # check-docc-coverage.sh
 # Fail when any public Swift declaration in Sources/ lacks a /// comment
-# on the immediately preceding line. Exempts re-export-only files and
-# generated stubs.
+# on the immediately preceding line.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-declare -a EXEMPT_FILES=(
-  "Sources/SwiftROS2/Exports.swift"
-)
-
-is_exempt() {
-  for f in "${EXEMPT_FILES[@]}"; do
-    [[ "$1" == "$f" ]] && return 0
-  done
-  return 1
-}
-
 violations=0
 
 while IFS= read -r file; do
-  if is_exempt "$file"; then continue; fi
   awk -v file="$file" '
     /^public (final |class |struct |protocol |enum |typealias |func |let |var |actor )/ {
       if (prev !~ /^\/\/\//) {
