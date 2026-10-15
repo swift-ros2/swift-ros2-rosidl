@@ -36,11 +36,47 @@ jobs:
       IMAGE: swift-ros2-interface-oracle:${{ matrix.ros_distro }}
     steps:
       - uses: actions/checkout@v4
+      # Same steps as the install-swift-linux composite action of the calling
+      # repositories, inlined because a local action path resolves in the
+      # caller's checkout, which this reusable workflow cannot rely on. The key
+      # and the path match that action, so the repository's build-linux job and
+      # this one share one cached tarball.
+      - name: Restore the Swift toolchain tarball
+        id: swift-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/swift-toolchain
+          key: v1-swift-toolchain-ubuntu24.04-${{ runner.arch }}-6.3.1
+      - name: Download and verify the Swift toolchain tarball
+        if: steps.swift-cache.outputs.cache-hit != 'true'
+        env:
+          TARBALL_DIR: ${{ runner.temp }}/swift-toolchain
+          VERIFY_DIR: ${{ runner.temp }}/swift-toolchain-verify
+        run: |
+          set -euo pipefail
+          file=swift-6.3.1-RELEASE-ubuntu24.04.tar.gz
+          url="https://download.swift.org/swift-6.3.1-release/ubuntu2404/swift-6.3.1-RELEASE/$file"
+          mkdir -p "$TARBALL_DIR" "$VERIFY_DIR"
+          # swift.org resets connections now and then; retry every error, not only the transient ones curl knows.
+          curl_retry=(-fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30)
+          curl "${curl_retry[@]}" -o "$TARBALL_DIR/$file" "$url"
+          curl "${curl_retry[@]}" -o "$VERIFY_DIR/$file.sig" "$url.sig"
+          curl "${curl_retry[@]}" --compressed -o "$VERIFY_DIR/all-keys.asc" https://www.swift.org/keys/all-keys.asc
+          # Only a tarball that matches its swift.org signature reaches the cache.
+          export GNUPGHOME="$VERIFY_DIR/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --quiet --import "$VERIFY_DIR/all-keys.asc"
+          gpg --batch --verify "$VERIFY_DIR/$file.sig" "$TARBALL_DIR/$file"
+      - name: Save the Swift toolchain tarball
+        if: steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/swift-toolchain
+          key: v1-swift-toolchain-ubuntu24.04-${{ runner.arch }}-6.3.1
       - name: Install Swift 6.3.1
         run: |
-          curl -fsSL "https://download.swift.org/swift-6.3.1-release/ubuntu2404/swift-6.3.1-RELEASE/swift-6.3.1-RELEASE-ubuntu24.04.tar.gz" -o /tmp/swift.tar.gz
           sudo mkdir -p /opt/swift
-          sudo tar -xzf /tmp/swift.tar.gz -C /opt/swift --strip-components=1
+          sudo tar -xzf "${{ runner.temp }}/swift-toolchain/swift-6.3.1-RELEASE-ubuntu24.04.tar.gz" -C /opt/swift --strip-components=1
           echo "/opt/swift/usr/bin" >> "$GITHUB_PATH"
       - name: Fetch the upstream IDL pinned in idl.lock
         run: bash Scripts/fetch-idl.sh
@@ -50,10 +86,11 @@ jobs:
           APT_PACKAGES: ${{ inputs.apt-packages }}
         run: |
           base="osrf/ros:${DISTRO}-desktop"
-          docker pull "$base"
+          # The image is 1+ GB; retry the pull if the registry drops it.
+          for attempt in 1 2 3; do docker pull "$base" && break; [ "$attempt" -lt 3 ] || exit 1; sleep 10; done
           pkgs=$(printf '%s' "$APT_PACKAGES" | sed "s/\${distro}/${DISTRO}/g")
           if [ -n "$pkgs" ]; then
-            printf 'FROM %s\nRUN apt-get update && apt-get install -y --no-install-recommends %s && rm -rf /var/lib/apt/lists/*\n' \
+            printf 'FROM %s\nRUN apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y --no-install-recommends %s && rm -rf /var/lib/apt/lists/*\n' \
               "$base" "$pkgs" | docker build -t "$IMAGE" -
           else
             docker tag "$base" "$IMAGE"
