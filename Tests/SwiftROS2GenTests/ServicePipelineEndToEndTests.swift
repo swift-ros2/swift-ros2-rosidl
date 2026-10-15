@@ -85,6 +85,8 @@ struct ServicePipelineEndToEndTests {
         #expect(umbrella.contents.contains("public enum SetBoolSrv: ROS2ServiceType"))
         #expect(umbrella.contents.contains("public typealias Request = SetBoolRequest"))
         #expect(umbrella.contents.contains("public typealias Response = SetBoolResponse"))
+        let imports = umbrella.contents.split(separator: "\n").filter { $0.hasPrefix("import ") }
+        #expect(imports == ["import SwiftROS2Messages"])
         #expect(umbrella.contents.contains("serviceName: \"std_srvs/srv/SetBool\""))
         #expect(umbrella.contents.contains("requestTypeName: \"std_srvs/srv/SetBool_Request\""))
         #expect(umbrella.contents.contains("responseTypeName: \"std_srvs/srv/SetBool_Response\""))
