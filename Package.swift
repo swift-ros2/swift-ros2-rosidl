@@ -74,10 +74,7 @@ let package = Package(
             name: "SwiftROS2MessagesTests", dependencies: ["SwiftROS2Messages"],
             path: "Tests/SwiftROS2MessagesTests"),
         .testTarget(
-            name: "SwiftROS2GenTests", dependencies: ["SwiftROS2Gen"],
+            name: "SwiftROS2GenTests", dependencies: ["SwiftROS2Gen", "SwiftROS2Messages"],
             path: "Tests/SwiftROS2GenTests", resources: [.copy("Resources")]),
-        .testTarget(
-            name: "SwiftROS2GenPluginTests", dependencies: [],
-            path: "Tests/SwiftROS2GenPluginTests"),
     ]
 )

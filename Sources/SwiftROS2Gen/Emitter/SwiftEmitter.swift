@@ -2,8 +2,9 @@
 public enum SwiftEmitter {
     /// ROS type names equal to a Swift standard-library type name. They keep the `Msg`
     /// suffix so the generated symbol does not shadow the standard-library type in files that
-    /// import the generated module.
-    private static let collisionTypeNames: Set<String> = [
+    /// import the generated module. `SwiftROS2GenPlugin` keeps a copy of this set, which
+    /// `PluginNamingTests` compares with this one.
+    static let collisionTypeNames: Set<String> = [
         "Bool", "String",
         "Int", "Int8", "Int16", "Int32", "Int64",
         "UInt", "UInt8", "UInt16", "UInt32", "UInt64",

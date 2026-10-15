@@ -37,7 +37,8 @@ jobs:
         run: |
           swift build --target PluginSmoke
           .build/debug/PluginSmoke | tee plugin-smoke.out
-          grep -q "BoolMsg.typeInfo.typeName" plugin-smoke.out
+          grep -q "BoolMsg.typeInfo.typeName = PluginSmoke/msg/Bool" plugin-smoke.out
+          grep -q "Point2.typeInfo.typeName = PluginSmoke/msg/Point2" plugin-smoke.out
 
   build-linux:
     name: Build & Test (Linux)
