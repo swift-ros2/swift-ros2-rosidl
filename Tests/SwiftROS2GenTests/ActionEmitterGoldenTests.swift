@@ -31,7 +31,7 @@ struct ActionEmitterGoldenTests {
         ]
     }
 
-    @Test("Fibonacci.swift matches the Phase-6 golden byte-for-byte")
+    @Test("Fibonacci.swift matches the golden byte-for-byte")
     func fibonacciGolden() throws {
         let idl = try Parser.parseAction(
             source: "int32 order\n---\nint32[] sequence\n---\nint32[] sequence\n",

@@ -257,9 +257,7 @@ extension IRBuilder {
     }
 
     /// Synthesize the five wire-level wrapper ``MessageIR``s per the rcl action
-    /// protocol. Field shapes mirror the hand-written generic wrappers in
-    /// `BuiltinActions/ActionWrappers.swift` (kept until they are deleted in
-    /// the same phase that ships this synthesis).
+    /// protocol, with the field shapes of the rosidl-generated wrappers.
     static func synthesizeActionWrappers(
         actionPackage: String,
         actionTypeName: String,
@@ -438,7 +436,7 @@ extension IRBuilder {
     /// distros come first so their field order takes precedence when a field
     /// is shared with a newer distro. Every other distro list in the generator
     /// derives from this one, so supporting a new ROS 2 release is a one-line
-    /// change here (plus the `ROS2Distro` case in `SwiftROS2Wire`).
+    /// change here (plus the `ROS2Distro` case in `SwiftROS2Messages`).
     public static let distroOrder: [String] = ["humble", "jazzy", "kilted", "lyrical", "rolling"]
 
     /// The distros that share the RIHS01 type-hash wire format: every distro
@@ -578,7 +576,7 @@ extension IRBuilder {
             kind: kind,
             fields: fields,
             constants: constants,
-            perDistroHashes: [:],  // populated by Pipeline (Task 6)
+            perDistroHashes: [:],  // populated by the pipeline
             perDistroFieldPresence: presencePerDistro
         )
     }

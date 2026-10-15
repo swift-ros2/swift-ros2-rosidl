@@ -1,6 +1,6 @@
 import Foundation
 
-/// Parses `.msg` source text into an ``IDLFile`` (Phase 1: primitive fields only).
+/// Parses `.msg`, `.srv` and `.action` source text into ``IDLFile`` / ``IDLService`` / ``IDLAction``.
 public enum Parser {
     public static func parseMessage(
         source: String,

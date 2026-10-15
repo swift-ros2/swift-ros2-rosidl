@@ -15,21 +15,18 @@ import Foundation
 ///   `/opt/ros/jazzy/share/unique_identifier_msgs/msg/UUID.json`
 ///   `/opt/ros/jazzy/share/action_msgs/msg/GoalStatusArray.json`
 ///
-/// Phase coverage:
-///   - Phase 1: primitive-only messages.
-///   - Phase 2: nested message references via `referenced_type_descriptions`.
-///   - Phase 3 (this file): fixed-size arrays, bounded/unbounded sequences,
-///     bounded strings. ``ConstantIR`` and ``FieldIR.defaultValue`` are
-///     intentionally **not** consulted — upstream `calculate_type_hash` deletes
-///     `default_value` from every field before SHA-256, and constants never
-///     appear in `serialize_individual_type_description` at all.
+/// Covers primitives, nested references (via `referenced_type_descriptions`),
+/// fixed-size arrays, bounded and unbounded sequences and bounded strings.
+/// ``ConstantIR`` and ``FieldIR/defaultValue`` are intentionally **not** consulted:
+/// upstream `calculate_type_hash` deletes `default_value` from every field before SHA-256,
+/// and constants never appear in `serialize_individual_type_description` at all.
 public enum RIHS01 {
 
     // MARK: - Public API
 
     /// Hash a (possibly nested) IR. `registry` maps `"<pkg>/msg/<Type>"` to the
     /// `MessageIR` for every type the root may reference (transitively). The
-    /// Pipeline (Task 9) builds the registry once per multi-package run.
+    /// pipeline builds the registry once per multi-package run.
     public static func hash(_ ir: MessageIR, registry: [String: MessageIR]) -> String {
         let payload = canonicalBytes(ir, registry: registry)
         let digest = SHA256.hash(data: payload)
@@ -150,7 +147,7 @@ public enum RIHS01 {
                 nestedTypeName: "")
         case .nested(let pkg, let type):
             // Default kind is `msg`; if the registry has the type under an
-            // `action`-kind IR (per Phase 6 action wrappers nesting `_Goal`
+            // `action`-kind IR (action wrappers nest `_Goal`
             // / `_Result` / `_Feedback`), use that as the canonical segment so
             // the rosidl JSON byte stream matches upstream exactly.
             let nested = canonicalNestedTypeName(
@@ -193,8 +190,7 @@ public enum RIHS01 {
 
     /// Resolve `<pkg>/<kind>/<Type>` for a nested reference. Tries the registry
     /// in `msg`, `srv`, `action` order so callers do not have to pass the kind
-    /// explicitly; falls back to `msg` when the registry has no entry (the
-    /// pre-Phase-6 behavior).
+    /// explicitly; falls back to `msg` when the registry has no entry.
     private static func canonicalNestedTypeName(
         package: String,
         typeName: String,

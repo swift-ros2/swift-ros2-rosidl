@@ -2,7 +2,7 @@ import Testing
 
 @testable import SwiftROS2Gen
 
-@Suite("IRBuilder — Phase 2 resolution")
+@Suite("IRBuilder — type resolution, defaults and constants")
 struct IRBuilderTests {
     @Test("converts snake_case field names to camelCase")
     func convertsSnakeCase() throws {

@@ -125,7 +125,7 @@ struct SwiftROS2GenCommand: ParsableCommand {
         var runs: [Pipeline.PackageRun] = []
         for raw in input {
             let pkg = try parseInput(raw)
-            // Phase 4: every distro is consumed. When the same package name
+            // Every distro is consumed. When the same package name
             // appears twice (e.g. once @humble and once @jazzy), the
             // pipeline merges them into a single distro-conditional IR.
             runs.append(

@@ -1,6 +1,5 @@
-/// Indicates which ROS 2 IDL family a `MessageIR` came from. Phase 3 introduces
-/// `.srv` to distinguish the synthesized request / response halves of a service
-/// — they get rendered into the canonical `<pkg>/srv/<Type>_Request|Response`
+/// Indicates which ROS 2 IDL family a `MessageIR` came from. `.srv` marks the
+/// synthesized request / response halves of a service — they get rendered into the canonical `<pkg>/srv/<Type>_Request|Response`
 /// type name, both in the RIHS01 hash input and in the emitted `typeInfo`.
 public enum MessageKind: String, CaseIterable, Equatable, Sendable {
     case msg
@@ -19,9 +18,8 @@ public struct MessageIR: Equatable, Sendable {
     public let kind: MessageKind
     public let fields: [FieldIR]
     public let constants: [ConstantIR]
-    /// Hash for each distro the IR was built against. Phase 1-3 fills only `"jazzy"`.
-    /// Phase 4 widens the value type to `String?` so a distro that supports the
-    /// type but has no RIHS01 (Humble) can be expressed as a present key with
+    /// Hash for each distro the IR was built against. The value is optional so a
+    /// distro that supports the type but has no RIHS01 (Humble) can be expressed as a present key with
     /// a `nil` value, distinct from the key being absent (which would mean the
     /// type does not exist in that distro at all).
     public var perDistroHashes: [String: String?] = [:]
@@ -58,8 +56,8 @@ public struct FieldIR: Equatable, Sendable {
     public let swiftName: String  // "linearAcceleration"
     public let type: FieldType
     public let defaultValue: DefaultValue?
-    /// Phase 4: which ROS 2 distros define this field. Defaults to `.all` so
-    /// single-distro callers (Phases 1-3) keep compiling without changes.
+    /// Which ROS 2 distros define this field. `.all` for a field every input
+    /// distribution has, and for every field of a single-distro IR.
     public let availability: FieldAvailability
 
     public init(
