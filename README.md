@@ -35,7 +35,7 @@ that the generated module will depend on, because generated code targets the pro
 release:
 
 ```bash
-git clone --branch 1.0.0-rc.2 https://github.com/swift-ros2/swift-ros2-rosidl.git
+git clone --branch 1.0.0 https://github.com/swift-ros2/swift-ros2-rosidl.git
 cd swift-ros2-rosidl
 swift run swift-ros2-gen --help
 ```
@@ -170,9 +170,9 @@ let package = Package(
         .library(name: "AudioCommonMsgs", targets: ["AudioCommonMsgs"])
     ],
     dependencies: [
-        .package(url: "https://github.com/swift-ros2/swift-ros2-rosidl.git", from: "1.0.0-rc.2"),
-        .package(url: "https://github.com/swift-ros2/swift-ros2-common-interfaces.git", from: "1.0.0-rc.2"),
-        .package(url: "https://github.com/swift-ros2/swift-ros2.git", from: "3.0.0-rc.2"),
+        .package(url: "https://github.com/swift-ros2/swift-ros2-rosidl.git", from: "1.0.0"),
+        .package(url: "https://github.com/swift-ros2/swift-ros2-common-interfaces.git", from: "1.0.0"),
+        .package(url: "https://github.com/swift-ros2/swift-ros2.git", from: "3.0.0"),
     ],
     targets: [
         // The generated types: every module a generated file imports is a dependency.
