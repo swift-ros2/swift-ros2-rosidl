@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.0.0-rc.3
+
+Last release candidate before the 1.0.0 API freeze.
+
+### Removed (breaking)
+
+- Dead public API: the `ROS2Publishable` / `ROS2Subscribable` aliases, the three-hash
+  `ROS2ActionTypeInfo` initializer, `CDRDecodingError.invalidArraySize`,
+  `Pipeline.generate(for:)` (use `generateMulti`) with `RIHS01.hash(_:)`,
+  `Pipeline.buildMessageRegistry`, `FieldType.rosTypeName`, and the swift-ros2-gen options
+  `--extra-import` and `--exclude-types` (#21).
+- `CDRSerializationError` keeps only the cases generated code throws (#23).
+
+### Changed
+
+- Malformed IDL is reported as an error with the file and line instead of stopping
+  swift-ros2-gen on a precondition failure: `IRBuilder.build(jazzy:)` throws, and every pipeline
+  error is printed as `error: ...` with exit status 1 (#22).
+- Generated `encode(to:)` throws `CDRSerializationError` for fixed arrays and bounded sequences
+  of the wrong length instead of trapping (#23).
+- Bounded strings (`string<=N`, and arrays and sequences of them) are length-checked: encoding
+  throws `CDRSerializationError.stringTooLong`, decoding throws
+  `CDRDecodingError.boundedStringTooLong`, counting UTF-8 bytes without the terminating NUL as
+  rosidl does; new `CDRDecoder.readString(maxLength:)` (#30).
+- `wstring` fields (bounded or not, alone or in arrays and sequences) are rejected with
+  `wstring is not supported yet` until the generator implements the RMW encodings; `wstring`
+  constants are still accepted (#31).
+- Generated service umbrella files no longer import `SwiftROS2CDR`, and every generated file's
+  `// Source:` line is `<pkg>/<kind>/<Type>.<kind>` (#24, #25).
+
+### Internal
+
+- One IDL directory walk for messages, services and actions; development-phase comments
+  replaced (#24, #26).
+- Drift guards for the build plugin's naming table and the distro list; DocC builds every
+  library target; CI caches the Swift toolchain and SDK downloads and retries them
+  (#27, #28, #29).
+
 ## 1.0.0-rc.2
 
 - `ROS2ServiceTypeInfo.serviceTypeHash` carries the service-level type hash, and
