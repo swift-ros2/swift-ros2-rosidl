@@ -82,7 +82,7 @@ nested type down to the primitives, so the generator needs all of them. For exam
 `AudioDataStamped` has a `std_msgs/Header`, and `Header` has a `builtin_interfaces/Time`. A
 message with a `std_msgs/Header` and a `sensor_msgs/PointField[]` needs `std_msgs`,
 `builtin_interfaces` and `sensor_msgs`. A missing package stops generation with
-`unresolved nested type '<pkg>/<Type>' — pass --input or --dependency for '<pkg>'`.
+`unresolved nested type '<pkg>/<Type>' — pass --input or --dependency for '<pkg>' on the same CLI invocation`.
 
 The generator parses each dependency as a whole package (`--types` filters only `--input`), so
 the references inside a dependency must resolve too. Passing all of `sensor_msgs` also needs
@@ -100,8 +100,10 @@ swift run swift-ros2-gen \
 ```
 
 `--dry-run` prints the files instead of writing them. `--types A,B` emits only some types of
-the `--input` packages. `--module <pkg>=<Module>` puts a package's types in a different module,
-both for emitted packages and for the imports of the packages they reference.
+the `--input` packages. `--module <pkg>=<Module>` changes only the module name that generated
+files `import` for a package, for example `--module audio_common_msgs=Audio` makes the files
+that reference `audio_common_msgs` write `import Audio`. It does not move the emitted files: they
+still go to `<PascalCasePackage>/`, so name your Swift target to match the module you pass.
 
 ### Distributions
 
@@ -127,7 +129,9 @@ ROS names that equal a Swift standard-library type get a `Msg` suffix (`StringMs
 
 ### Output layout
 
-`--output <dir>` writes `<dir>/<Module>/<Type>.swift`:
+`--output <dir>` writes `<dir>/<PascalCasePackage>/<Type>.swift`, for example
+`<dir>/AudioCommonMsgs/AudioData.swift` for `audio_common_msgs`. `--module` does not change the
+directory. The files are:
 
 - a message: `<Type>.swift`;
 - a service: `<Srv>Srv.swift` (the `ROS2ServiceType`), `<Srv>Request.swift` and
@@ -145,7 +149,7 @@ AudioCommonMsgs/
 ```
 
 There is no `Generated/` subdirectory, so `--output Sources` fills the target named after the
-module. The generator overwrites files and never deletes them, so remove the files of deleted
+package (`Sources/AudioCommonMsgs/`). The generator overwrites files and never deletes them, so remove the files of deleted
 types yourself. (This repository's `Scripts/regenerate.sh` copies its own output into
 `Sources/<Module>/Generated/`. That is a convention of this repository, not generator output.)
 
@@ -244,7 +248,8 @@ the oracle JSON of a mismatch under `/tmp/swift-ros2-gen-diagnose/`.
 committed. It covers only self-contained message packages:
 
 - It reads only `msg/*.msg` directly inside the target's directory. It ignores `.srv` and
-  `.action` files with a warning.
+  `.action` files with a warning. If `srv/` or `action/` directories sit inside the target,
+  list them in `exclude:` too, or SwiftPM warns that it found unhandled files.
 - The target's name is the ROS package name, so name the target after the package
   (`my_msgs`). The type names (`my_msgs/msg/Point2`) and the hashes use it.
 - It passes no `--dependency`. A field may use only primitives and other messages of the same
@@ -263,7 +268,9 @@ committed. It covers only self-contained message packages:
         .product(name: "SwiftROS2CDR", package: "swift-ros2-rosidl"),
         .product(name: "SwiftROS2Messages", package: "swift-ros2-rosidl"),
     ],
-    exclude: ["msg"],  // the plugin reads msg/ itself
+    // The plugin reads msg/ itself; srv/ and action/ are ignored, and excluding them silences
+    // SwiftPM's "unhandled files" warning. Drop the entries for directories you do not have.
+    exclude: ["msg", "srv", "action"],
     plugins: [.plugin(name: "SwiftROS2GenPlugin", package: "swift-ros2-rosidl")]),
 ```
 
