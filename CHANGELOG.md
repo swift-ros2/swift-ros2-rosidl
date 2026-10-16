@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The `interface-oracles.yml` reusable workflow upgrades the oracle image's packages after
+  installing `apt-packages`, so freshly installed packages no longer fail against an older
+  published `osrf/ros` image (for example a missing `ServiceEventInfo` symbol on Lyrical).
+  Callers without `apt-packages` get the same image as before.
+
 ## 1.0.0
 
 First stable release; the public API is now covered by semantic versioning. The code is

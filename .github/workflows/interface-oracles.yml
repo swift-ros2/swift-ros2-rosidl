@@ -16,7 +16,8 @@ on:
         description: >-
           Extra Debian packages installed into osrf/ros:<distro>-desktop before the oracles run,
           space-separated; ${distro} is replaced with the row's distribution
-          (e.g. "ros-${distro}-moveit-msgs ros-${distro}-control-msgs")
+          (e.g. "ros-${distro}-moveit-msgs ros-${distro}-control-msgs"); the image's packages
+          are upgraded to the same sync.
         required: false
         type: string
         default: ''
@@ -90,7 +91,10 @@ jobs:
           for attempt in 1 2 3; do docker pull "$base" && break; [ "$attempt" -lt 3 ] || exit 1; sleep 10; done
           pkgs=$(printf '%s' "$APT_PACKAGES" | sed "s/\${distro}/${DISTRO}/g")
           if [ -n "$pkgs" ]; then
-            printf 'FROM %s\nRUN apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y --no-install-recommends %s && rm -rf /var/lib/apt/lists/*\n' \
+            # Packages from the current sync can need newer core libraries than the published
+            # image has (Lyrical 2026-10: control_msgs' type support needed a newer
+            # service_msgs), so bring the image to the same sync as the packages.
+            printf 'FROM %s\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y --no-install-recommends %s && apt-get -o Acquire::Retries=5 upgrade -y && rm -rf /var/lib/apt/lists/*\n' \
               "$base" "$pkgs" | docker build -t "$IMAGE" -
           else
             docker tag "$base" "$IMAGE"
