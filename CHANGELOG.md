@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0
+
+First stable release; the public API is now covered by semantic versioning. The code is
+unchanged since 1.0.0-rc.3, which was checked against live ROS 2 Humble, Jazzy, Kilted and
+Lyrical hosts over Zenoh and DDS through swift-ros2 3.0.0-rc.3.
+
+- The README now says `--module` only changes the generated `import`s (files still land in
+  `<PascalCasePackage>/`), quotes the full unresolved-nested-type error, and excludes `srv/`
+  and `action/` directories when using the build plugin (#34).
+
 ## 1.0.0-rc.3
 
 Last release candidate before the 1.0.0 API freeze.
