@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.1
+
+Patch release for the reusable oracle workflow; the package code is unchanged since 1.0.0.
 
 ### Fixed
 
