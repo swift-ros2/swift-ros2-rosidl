@@ -26,13 +26,27 @@ public enum ROS2Distro: String, CaseIterable, Sendable {
 
     /// Position in release order. Rolling is always last; a distribution added later goes
     /// before it.
-    private var releaseIndex: Int {
+    var releaseIndex: Int {
         switch self {
         case .humble: return 0
         case .jazzy: return 1
         case .kilted: return 2
         case .lyrical: return 3
         case .rolling: return 4
+        }
+    }
+}
+
+extension ROS2Distro {
+    /// The distribution at `releaseIndex` (see ``releaseIndex``), or nil for no distribution.
+    init?(releaseIndex: Int) {
+        switch releaseIndex {
+        case 0: self = .humble
+        case 1: self = .jazzy
+        case 2: self = .kilted
+        case 3: self = .lyrical
+        case 4: self = .rolling
+        default: return nil
         }
     }
 }

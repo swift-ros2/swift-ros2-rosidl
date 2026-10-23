@@ -68,28 +68,33 @@ public final class CDRDecoder {
     /// The raw value of the ROS 2 distribution whose message schemas this decoder reads
     /// (`"lyrical"`), or nil for a decoder made with ``init(data:isLegacySchema:)``.
     ///
-    /// This module cannot name `ROS2Distro`; `SwiftROS2Messages` sets this value through
-    /// `CDRDecoder(data:distro:)` and reads it back as `schemaDistro`, which generated types
-    /// compare against to read a field only on the distributions that have it.
+    /// This module cannot name `ROS2Distro`: `SwiftROS2Messages` creates a decoder for a
+    /// distribution with `CDRDecoder(data:distro:)` and reads it back as `schemaDistro`, which
+    /// generated types compare against to read a field only on the distributions that have it.
     public let schemaDistroName: String?
+
+    /// The release-order position of the distribution named ``schemaDistroName``, set together
+    /// with it by `SwiftROS2Messages`, so `schemaDistro` needs no string parsing per guard.
+    package let schemaDistroReleaseIndex: Int?
 
     /// Create a decoder from CDR data (validates encapsulation header)
     public init(data: Data, isLegacySchema: Bool = false) throws {
         try Self.validateEncapsulationHeader(data)
         self.isLegacySchema = isLegacySchema
         self.schemaDistroName = nil
+        self.schemaDistroReleaseIndex = nil
         self.data = data
         self.offset = Self.encapsulationHeaderSize
     }
 
-    /// Creates a decoder for the schemas of the distribution named `schemaDistroName` (validates
-    /// the encapsulation header). `isLegacySchema` must be true exactly for a distribution that
-    /// uses the pre-Iron schemas (Humble). Prefer `CDRDecoder(data:distro:)` from
-    /// `SwiftROS2Messages`, which sets both.
-    public init(data: Data, schemaDistroName: String, isLegacySchema: Bool) throws {
+    /// Creates a decoder for the schemas of one distribution (validates the encapsulation
+    /// header). Only `SwiftROS2Messages` calls it, from a `ROS2Distro`, so the name, its release
+    /// index and the legacy flag always agree; everyone else uses `CDRDecoder(data:distro:)`.
+    package init(data: Data, schemaDistroName: String, releaseIndex: Int, isLegacySchema: Bool) throws {
         try Self.validateEncapsulationHeader(data)
         self.isLegacySchema = isLegacySchema
         self.schemaDistroName = schemaDistroName
+        self.schemaDistroReleaseIndex = releaseIndex
         self.data = data
         self.offset = Self.encapsulationHeaderSize
     }

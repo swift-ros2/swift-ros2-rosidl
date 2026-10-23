@@ -20,25 +20,31 @@ public final class CDREncoder {
     /// The raw value of the ROS 2 distribution whose message schemas this encoder writes
     /// (`"lyrical"`), or nil for an encoder made with ``init(estimatedSize:isLegacySchema:)``.
     ///
-    /// This module cannot name `ROS2Distro`; `SwiftROS2Messages` sets this value through
-    /// `CDREncoder(distro:)` and reads it back as `schemaDistro`, which generated types compare
-    /// against to write a field only on the distributions that have it.
+    /// This module cannot name `ROS2Distro`: `SwiftROS2Messages` creates an encoder for a
+    /// distribution with `CDREncoder(distro:)` and reads it back as `schemaDistro`, which
+    /// generated types compare against to write a field only on the distributions that have it.
     public let schemaDistroName: String?
+
+    /// The release-order position of the distribution named ``schemaDistroName``, set together
+    /// with it by `SwiftROS2Messages`, so `schemaDistro` needs no string parsing per guard.
+    package let schemaDistroReleaseIndex: Int?
 
     /// Creates an encoder for the Humble schema (`isLegacySchema`) or the Jazzy schema.
     public init(estimatedSize: Int = 256, isLegacySchema: Bool = false) {
         buffer = Data(capacity: estimatedSize)
         self.isLegacySchema = isLegacySchema
         self.schemaDistroName = nil
+        self.schemaDistroReleaseIndex = nil
     }
 
-    /// Creates an encoder for the schemas of the distribution named `schemaDistroName`.
-    /// `isLegacySchema` must be true exactly for a distribution that uses the pre-Iron schemas
-    /// (Humble). Prefer `CDREncoder(distro:)` from `SwiftROS2Messages`, which sets both.
-    public init(estimatedSize: Int = 256, schemaDistroName: String, isLegacySchema: Bool) {
+    /// Creates an encoder for the schemas of one distribution. Only `SwiftROS2Messages` calls
+    /// it, from a `ROS2Distro`, so the name, its release index and the legacy flag always agree;
+    /// everyone else uses `CDREncoder(distro:)`.
+    package init(estimatedSize: Int = 256, schemaDistroName: String, releaseIndex: Int, isLegacySchema: Bool) {
         buffer = Data(capacity: estimatedSize)
         self.isLegacySchema = isLegacySchema
         self.schemaDistroName = schemaDistroName
+        self.schemaDistroReleaseIndex = releaseIndex
     }
 
     public func reset() {
