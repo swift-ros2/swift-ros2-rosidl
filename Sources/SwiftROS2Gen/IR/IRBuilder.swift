@@ -352,6 +352,11 @@ extension IRBuilder {
     /// because the wrappers reference it; the per-action user IRs and the
     /// service-description types (``ServiceDescription``) are added automatically.
     ///
+    /// Every hash is the one `distro` has: each type in the registry, the action's own parts
+    /// and any merged type they reference, is projected onto `distro` (see
+    /// ``RIHS01/hash(_:for:registry:)``), so a field that only some distributions have
+    /// reaches the hashes of the distributions that have it.
+    ///
     /// The action-level `<pkg>/action/<Type>` hash is not stored: no wire codec
     /// reads it. `swift-ros2-gen --verify-hashes` still checks it.
     public static func populateActionHashes(
@@ -373,22 +378,21 @@ extension IRBuilder {
         registry[ir.feedbackMessage.rosTypeName] = ir.feedbackMessage
         ServiceDescription.register(action: ir, into: &registry)
 
-        let goalHash = RIHS01.hash(ir.goal, registry: registry)
-        let resultHash = RIHS01.hash(ir.result, registry: registry)
-        let feedbackHash = RIHS01.hash(ir.feedback, registry: registry)
-        let sgReqHash = RIHS01.hash(ir.sendGoalRequest, registry: registry)
-        let sgRespHash = RIHS01.hash(ir.sendGoalResponse, registry: registry)
-        let grReqHash = RIHS01.hash(ir.getResultRequest, registry: registry)
-        let grRespHash = RIHS01.hash(ir.getResultResponse, registry: registry)
-        let fbMsgHash = RIHS01.hash(ir.feedbackMessage, registry: registry)
-        let sgServiceHash = RIHS01.hash(
-            ServiceDescription.serviceIR(
-                package: ir.package, kind: .action, serviceName: "\(ir.typeName)_SendGoal"),
-            registry: registry)
-        let grServiceHash = RIHS01.hash(
-            ServiceDescription.serviceIR(
-                package: ir.package, kind: .action, serviceName: "\(ir.typeName)_GetResult"),
-            registry: registry)
+        func hash(_ message: MessageIR) -> String {
+            RIHS01.hash(message, for: distro, registry: registry)
+        }
+        let goalHash = hash(ir.goal)
+        let resultHash = hash(ir.result)
+        let feedbackHash = hash(ir.feedback)
+        let sgReqHash = hash(ir.sendGoalRequest)
+        let sgRespHash = hash(ir.sendGoalResponse)
+        let grReqHash = hash(ir.getResultRequest)
+        let grRespHash = hash(ir.getResultResponse)
+        let fbMsgHash = hash(ir.feedbackMessage)
+        let sgServiceHash = hash(
+            ServiceDescription.serviceIR(package: ir.package, kind: .action, serviceName: "\(ir.typeName)_SendGoal"))
+        let grServiceHash = hash(
+            ServiceDescription.serviceIR(package: ir.package, kind: .action, serviceName: "\(ir.typeName)_GetResult"))
 
         // Store per-message hashes on the contained IRs so the emitter (which
         // reuses the message emitter for each wrapper) can read them out of
