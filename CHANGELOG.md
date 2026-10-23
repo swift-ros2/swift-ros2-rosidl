@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+Message fields that differ among the distributions after Humble, with one type hash per
+distribution where they differ. Types that differ only on Humble generate as in 1.0.
 
 ### Added
 
@@ -49,7 +52,6 @@
 - A message with no fields in some distributions writes and reads rosidl's
   `structure_needs_at_least_one_member` byte in exactly those distributions (Humble splits
   included), matching its hash; the codec wrote nothing there.
-
 - A field a later distribution adds in the middle of a message is placed where that
   distribution has it, not at the end.
 - `IRBuilder.populateActionHashes(_:distro:extraRegistry:)` projects the types an action
