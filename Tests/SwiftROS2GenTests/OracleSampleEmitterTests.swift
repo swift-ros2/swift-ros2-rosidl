@@ -68,8 +68,36 @@ struct OracleSampleEmitterTests {
         #expect(files.map(\.relativePath) == ["OracleSamples+BuiltinInterfaces.swift", "OracleSamples.swift"])
         let registry = try #require(files.last)
         #expect(registry.contents.contains("rosName: \"builtin_interfaces/msg/Time\""))
-        #expect(registry.contents.contains("reencode: { try oracleReencode(Time.self, $0) }"))
+        #expect(registry.contents.contains("encode: { try oracleEncode(Time.oracleSample(), $0) }"))
+        #expect(registry.contents.contains("reencode: { try oracleReencode(Time.self, $0, $1) }"))
         #expect(registry.contents.contains("\nimport BuiltinInterfaces\n"))
+    }
+
+    @Test("samples(for:) encodes with that distribution's schema")
+    func samplesForDistroUseItsSchema() throws {
+        let fixture = try MultiDistroFixture(MultiDistroFixture.modernVarying)
+        defer { fixture.remove() }
+        let registry = try #require(
+            try Pipeline.generateOracleSamples(fixture.runs).first { $0.relativePath == "OracleSamples.swift" }
+        ).contents
+        // The requested distribution picks the codecs (Rolling's guards give it Lyrical's shape);
+        // its stand-in only picks the types.
+        #expect(
+            registry.contains(
+                """
+                        let source = distro == "rolling" && !distributions.contains("rolling") ? "lyrical" : distro
+                        guard distributions.contains(source) else { return nil }
+                        let schema = ROS2Distro(rawValue: distro)
+                        return types.filter { $0.distributions.contains(source) }.map { $0.sample(schema: schema) }
+                """))
+        #expect(registry.contains("static let all: [OracleSample] = types.map { $0.sample(schema: nil) }"))
+        #expect(registry.contains("let encoder = schema.map { CDREncoder(distro: $0) } ?? CDREncoder()"))
+        #expect(
+            registry.contains(
+                "let decoder = try schema.map { try CDRDecoder(data: data, distro: $0) } ?? CDRDecoder(data: data)"))
+        #expect(registry.contains("return try oracleEncode(T(from: decoder), schema)"))
+        #expect(registry.contains("encode: { try oracleEncode(ModernVarying.oracleSample(), $0) },"))
+        #expect(registry.contains("\nimport SwiftROS2Messages\n"))
     }
 
     @Test("dependency types get an extension only when an emitted type reaches them")

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Prints the swift-ros2-gen package arguments for this repository, one per line, reading the
 # IDL that Scripts/fetch-idl.sh put in .idl/.
-#   generator-args.sh             every generated distribution (Scripts/regenerate.sh)
-#   generator-args.sh <distro>    only <distro>, labelled @<distro> (the oracle matrix);
-#                                 rolling reads the Lyrical IDL, as generated types give
-#                                 Rolling the modern (Lyrical) hash
+#   generator-args.sh             every generated distribution (Scripts/regenerate.sh and the
+#                                 hash oracle, which selects its row with --distros)
+#   generator-args.sh <distro>    only <distro>, labelled @<distro>, to check one distribution's
+#                                 IDL alone; rolling reads the Lyrical IDL
 set -euo pipefail
 DISTROS=${1:-"humble jazzy kilted lyrical"}
 for distro in $DISTROS; do

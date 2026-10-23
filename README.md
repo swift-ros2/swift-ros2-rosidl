@@ -278,8 +278,12 @@ swift run swift-ros2-gen \
 ```
 
 `--distros` selects the distributions to check. The default is every distribution of the
-inputs except Humble, and each one must be the distribution of the image. `--diagnose` writes
-the oracle JSON of a mismatch under `/tmp/swift-ros2-gen-diagnose/`.
+inputs except Humble, and each one must be the distribution of the image. Every `--input`
+distribution is still read, so pass the same inputs you generate from: the hashes checked are
+those the merged types carry. A distribution none of the inputs has, such as `rolling`, is
+checked as generated types treat it, with the shape of the newest input distribution that is
+not newer (see [Distributions](#distributions)). `--diagnose` writes the oracle JSON of a
+mismatch under `/tmp/swift-ros2-gen-diagnose/`.
 
 ### The build plugin
 
@@ -333,9 +337,8 @@ To move to newer upstream IDL, change the commit on the line
 
 Other interface repositories (swift-ros2-common-interfaces, later swift-ros2-extra-interfaces)
 use the same layout: an `idl.lock`, a copy of `Scripts/fetch-idl.sh`, a
-`Scripts/generator-args.sh` that prints every distribution's arguments, or with one
-distribution argument only that distribution labelled with it (`rolling` reads the Lyrical
-IDL), and an internal corpus executable built from `--emit-oracle-samples` output. They call
+`Scripts/generator-args.sh` that prints every distribution's arguments, and an internal corpus
+executable built from `--emit-oracle-samples` output. They call
 the reusable workflow at the rosidl version their `Package.resolved` pins:
 
 ```yaml
@@ -347,22 +350,26 @@ jobs:
       apt-packages: ros-${distro}-moveit-msgs   # only when the desktop image lacks a package
 ```
 
-The workflow checks every RIHS01 hash against `osrf/ros:<distro>-desktop` and round-trips
-every generated sample through Swift, and the samples of the row's distribution through
-rclpy. Jazzy and Lyrical run on every event; Kilted and Rolling run on the caller's weekly
-`schedule` and are non-blocking.
+The workflow checks every RIHS01 hash against `osrf/ros:<distro>-desktop`, from the arguments
+of every generated distribution with `--distros <row>`, so it checks the hashes the merged
+generated types carry for the row (Rolling: the newest generated distribution's shape). It
+round-trips every generated sample through Swift, and the samples of the row's distribution,
+encoded with that distribution's message schemas, through rclpy. Jazzy and Lyrical run on
+every event; Kilted and Rolling run on the caller's weekly `schedule` and are non-blocking.
 
 The corpus executable is a copy of `Sources/RosidlOracleCorpus/main.swift` compiled with the
 generated `OracleSamples*.swift` files. The workflow runs it as
 `swift run <corpus-product> <output-dir> <distro>`:
 
-- It decodes and re-encodes every generated sample in Swift and exits 1 when any round-trip
-  changes the bytes.
+- It decodes and re-encodes every generated sample in Swift, with the default (Jazzy) message
+  schemas and with those of `<distro>`, and exits 1 when any round-trip changes the bytes.
 - It writes `<output-dir>/<pkg>/<msg|srv|action>/<Name>.cdr` for the samples of the types
-  `<distro>` has: each sample lists the distributions whose IDL has its type, so a type that
-  only some distributions have (geometry_msgs `Pose2D` is not in Lyrical) is left out of the
-  others. `rolling` gets the Lyrical set unless Rolling IDL was generated. Without `<distro>`
-  it writes every sample; `<output-dir>` defaults to `oracle-corpus`.
+  `<distro>` has, encoded with `<distro>`'s message schemas
+  (`OracleSamples.samples(for:)`): each sample lists the distributions whose IDL has its type,
+  so a type that only some distributions have (geometry_msgs `Pose2D` is not in Lyrical) is
+  left out of the others, and a field only some distributions have is written only for them.
+  `rolling` gets the Lyrical set unless Rolling IDL was generated. Without `<distro>` it
+  writes every sample with the default schemas; `<output-dir>` defaults to `oracle-corpus`.
 - It exits 2 when no IDL was generated for `<distro>`.
 
 `Scripts/cdr-oracle.py` stays strict: a sample whose type the oracle image lacks fails.

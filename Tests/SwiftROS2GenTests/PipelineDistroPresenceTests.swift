@@ -126,6 +126,38 @@ struct PipelineDistroPresenceTests {
         #expect(plan.first { $0.typeName == "S_Response" }?.topLevelTypeName == "S")
     }
 
+    @Test("the verify plan checks Rolling with the newest read distribution's projection")
+    func verifyPlanRollingStandIn() throws {
+        let package = try SplitPackage()
+        defer { package.remove() }
+        let rolling = try Pipeline.buildVerifyPlan(package.runs, distros: ["rolling"])
+        let lyrical = try Pipeline.buildVerifyPlan(package.runs, distros: ["lyrical"])
+        // The Lyrical types, labelled Rolling so the JSON is read from /opt/ros/rolling.
+        #expect(rolling.allSatisfy { $0.distro == "rolling" })
+        #expect(Set(rolling.map(\.rosTypeName)) == Set(lyrical.map(\.rosTypeName)))
+        #expect(rolling.contains { $0.rosTypeName == "foo_msgs/msg/A" })
+        #expect(!rolling.contains { $0.rosTypeName == "foo_msgs/msg/B" })
+        #expect(rolling.contains { $0.rosTypeName == "foo_msgs/action/L_SendGoal" })
+
+        // A merged type is checked with the shape generated code gives Rolling (Lyrical's),
+        // and an unread Kilted between Jazzy and Lyrical with Jazzy's.
+        let varying = try MultiDistroFixture(ModernHashPropagationTests.planPackage(["jazzy", "lyrical"]))
+        defer { varying.remove() }
+        func hashes(_ distro: String) throws -> [String: String] {
+            Dictionary(
+                uniqueKeysWithValues: try Pipeline.buildVerifyPlan(varying.runs, distros: [distro]).map {
+                    #expect($0.distro == distro)
+                    return ($0.rosTypeName, $0.expectedHash)
+                })
+        }
+        let jazzyHashes = try hashes("jazzy")
+        let lyricalHashes = try hashes("lyrical")
+        #expect(try hashes("rolling") == lyricalHashes)
+        #expect(try hashes("kilted") == jazzyHashes)
+        #expect(jazzyHashes["fixture_msgs/msg/Plan"] != lyricalHashes["fixture_msgs/msg/Plan"])
+        #expect(jazzyHashes["fixture_msgs/action/Move_SendGoal"] != lyricalHashes["fixture_msgs/action/Move_SendGoal"])
+    }
+
     @Test("an action that differs between distributions is rejected")
     func divergentActionIsRejected() throws {
         let package = try SplitPackage()

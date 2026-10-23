@@ -23,6 +23,9 @@
   `withoutTypeHashes` on the three type info structs. swift-ros2 needs them to send the
   layout and hash of the distribution it runs against.
 - `SwiftEmitter.emitServiceUmbrella(…, hashesByDistro:, …)` and `ServiceHashes`.
+- The generated oracle corpus encodes and decodes the samples of `OracleSamples.samples(for:)`
+  with that distribution's message schemas (`OracleSamples.all` keeps the default ones), and
+  `RosidlOracleCorpus` round-trips both sets.
 
 ### Changed
 
@@ -32,6 +35,12 @@
   between two that have it; any other difference among modern distributions is supported.
 - `RIHS01.hash(_:for:registry:)` projects a merged type onto the distribution it was read for
   that gives its shape (see above) when asked for a distribution it was not read for.
+- `swift-ros2-gen --verify-hashes --distros <d>` reads every `--input` distribution, so it
+  checks the hashes of the merged types, and checks a distribution no input has (Rolling) with
+  the shape generated types give it. The `interface-oracles.yml` hash oracle passes every
+  generated distribution (`Scripts/generator-args.sh` without an argument) with
+  `--distros <row>`, so it verifies the hashes the generated code carries rather than one
+  distribution's IDL alone.
 
 ### Fixed
 
