@@ -162,12 +162,22 @@ public enum SwiftEmitter {
             for field in ir.fields {
                 out += emitEncodeWithAvailability(field, read: read)
             }
+            if let condition = emptyShapeCondition(ir.fields, read: read, codec: "encoder") {
+                out += "        if \(condition) {\n"
+                out += "            encoder.writeUInt8(0)\n"
+                out += "        }\n"
+            }
             out += "    }\n"
             out += "\n"
             out += "    public init(from decoder: CDRDecoder) throws {\n"
             for field in ir.fields {
                 out += emitDecodeWithAvailability(
                     field, nestedNameOverrides: nestedNameOverrides, read: read)
+            }
+            if let condition = emptyShapeCondition(ir.fields, read: read, codec: "decoder") {
+                out += "        if \(condition) {\n"
+                out += "            _ = try decoder.readUInt8()\n"
+                out += "        }\n"
             }
             out += "    }\n"
         }
@@ -772,6 +782,25 @@ public enum SwiftEmitter {
             if let until { parts.append("\(codec).schemaDistro < .\(until)") }
             return parts.isEmpty ? nil : parts.joined(separator: " && ")
         }
+    }
+
+    /// The condition, on the codec named `codec`, of the distributions in which none of
+    /// `fields` exists, or nil when every read distribution has one. rosidl gives such a
+    /// distribution's empty structure the `uint8 structure_needs_at_least_one_member` sentinel
+    /// and serializes it (one 0x00 byte), as ``RIHS01`` hashes it, so the codec writes and reads
+    /// that byte there. Several separate runs of such distributions are joined with `||`.
+    static func emptyShapeCondition(_ fields: [FieldIR], read: Set<String>?, codec: String) -> String? {
+        guard let read, !fields.isEmpty else { return nil }
+        let ordered = IRBuilder.distroOrder.filter(read.contains)
+        let empty = ordered.map { distro in !fields.contains { $0.availability.includes(distro) } }
+        var runs: [Set<String>] = []
+        for (i, distro) in ordered.enumerated() where empty[i] {
+            if i > 0, empty[i - 1] { runs[runs.count - 1].insert(distro) } else { runs.append([distro]) }
+        }
+        let conditions = runs.compactMap { guardCondition(fieldGuard(present: $0, read: read), codec: codec) }
+        guard !conditions.isEmpty else { return nil }
+        if conditions.count == 1 { return conditions[0] }
+        return conditions.map { $0.contains("&&") ? "(\($0))" : $0 }.joined(separator: " || ")
     }
 
     /// The doc comment of a field that only some modern distributions have, at `indent`: the

@@ -11,18 +11,26 @@ struct MultiDistroFixture {
     let runs: [Pipeline.PackageRun]
 
     init(_ filesByDistro: [String: [String: String]], package: String = "fixture_msgs") throws {
+        try self.init(packages: [package: filesByDistro])
+    }
+
+    /// Several packages, each with its own files per distribution (and so its own set of
+    /// distributions), all emitted.
+    init(packages: [String: [String: [String: String]]]) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "swift-ros2-gen-multi-distro-\(UUID().uuidString)", isDirectory: true)
         var runs: [Pipeline.PackageRun] = []
-        for distro in IRBuilder.distroOrder where filesByDistro[distro] != nil {
-            let dir = root.appendingPathComponent("\(distro)/\(package)", isDirectory: true)
-            for (path, contents) in filesByDistro[distro]! {
-                let url = dir.appendingPathComponent(path)
-                try FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try contents.write(to: url, atomically: true, encoding: .utf8)
+        for (package, filesByDistro) in packages.sorted(by: { $0.key < $1.key }) {
+            for distro in IRBuilder.distroOrder where filesByDistro[distro] != nil {
+                let dir = root.appendingPathComponent("\(distro)/\(package)", isDirectory: true)
+                for (path, contents) in filesByDistro[distro]! {
+                    let url = dir.appendingPathComponent(path)
+                    try FileManager.default.createDirectory(
+                        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try contents.write(to: url, atomically: true, encoding: .utf8)
+                }
+                runs.append(Pipeline.PackageRun(input: PackageInput(name: package, directory: dir, distro: distro)))
             }
-            runs.append(Pipeline.PackageRun(input: PackageInput(name: package, directory: dir, distro: distro)))
         }
         for name in ["unique_identifier_msgs", "builtin_interfaces"] {
             let dir = try #require(
@@ -64,4 +72,11 @@ struct MultiDistroFixture {
         ]
         return messages.mapValues { ["msg/ModernVarying.msg": $0, "action/ModernVarying.action": action] }
     }()
+
+    /// `fixture_msgs/msg/Grow`: `int32 old` on Humble, no fields on Jazzy and Kilted, and
+    /// `float64 x` on Lyrical.
+    static let growing: [String: [String: String]] = [
+        "humble": ["msg/Grow.msg": "int32 old\n"], "jazzy": ["msg/Grow.msg": "\n"],
+        "kilted": ["msg/Grow.msg": "\n"], "lyrical": ["msg/Grow.msg": "float64 x\n"],
+    ]
 }

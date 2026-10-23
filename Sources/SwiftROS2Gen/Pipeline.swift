@@ -370,17 +370,16 @@ extension Pipeline {
         moduleNames: ModuleNames = [:]
     ) throws -> [GeneratedFile] {
         let c = try collect(runs)
-        // Every type gets the hash of each modern distribution whose IDL has it, projected onto
-        // that distribution. The registry projection makes a type that reaches a varying type
-        // (at any depth, across packages) vary as well. Jazzy is always there, because the
-        // static `typeInfo` and the `typeInfo(for:)` fallback read it. Humble has no RIHS01 and
-        // never gets a key, so a type that only differs on Humble keeps one modern hash.
-        var distrosByRosName: [String: Set<String>] = [:]
+        // Every type gets the hash of every modern distribution, projected onto it: each type in
+        // the registry takes its own shape for that distribution (its schema distribution when
+        // it was not read for it), as generated code encodes it. A type that reaches a varying
+        // type (at any depth, across packages, even one read for more distributions than the
+        // type itself) varies as well; equal hashes collapse into one `typeInfo`. Humble has no
+        // RIHS01 and never gets a key, so a type that only differs on Humble keeps one hash.
         var hashesByRosName: [String: [String: String]] = [:]
         for entry in c.unresolvedIRs {
-            distrosByRosName[entry.ir.rosTypeName] = entry.distros
             var hashes: [String: String] = [:]
-            for distro in hashedDistros(entry.distros) {
+            for distro in IRBuilder.modernDistros {
                 hashes[distro] = RIHS01.hash(entry.ir, for: distro, registry: c.registry)
             }
             hashesByRosName[entry.ir.rosTypeName] = hashes
@@ -440,7 +439,7 @@ extension Pipeline {
             let serviceIR = ServiceDescription.serviceIR(
                 package: svc.package, kind: .srv, serviceName: svc.typeName)
             var hashesByDistro: [String: ServiceHashes] = [:]
-            for distro in hashedDistros(distrosByRosName[reqKey] ?? []) {
+            for distro in IRBuilder.modernDistros {
                 hashesByDistro[distro] = ServiceHashes(
                     requestHash: hashesByRosName[reqKey]?[distro],
                     responseHash: hashesByRosName[resKey]?[distro],
@@ -470,11 +469,11 @@ extension Pipeline {
         // outer `<TypeName>Action` enum (with nested `Goal` / `Result` /
         // `Feedback`) plus the five sibling `<TypeName>_<Wrapper>` structs.
         // The action-level + wrapper hashes come from
-        // ``IRBuilder/populateActionHashes(_:distro:extraRegistry:)``, once per hashed
-        // distribution of the action, which reuses the global registry assembled above.
+        // ``IRBuilder/populateActionHashes(_:distro:extraRegistry:)``, once per modern
+        // distribution, which reuses the global registry assembled above.
         for act in c.collectedActions where !c.dependencyPackages.contains(act.package) {
             var actionIR = act.actionIR
-            for distro in hashedDistros(distrosByRosName[act.actionIR.goal.rosTypeName] ?? []) {
+            for distro in IRBuilder.modernDistros {
                 IRBuilder.populateActionHashes(&actionIR, distro: distro, extraRegistry: c.registry)
             }
             let swift = SwiftEmitter.emit(
@@ -491,12 +490,6 @@ extension Pipeline {
                 ))
         }
         return results
-    }
-
-    /// The distributions a type read for `distros` gets a RIHS01 hash for: its modern ones,
-    /// and always Jazzy, which the static `typeInfo` reads.
-    static func hashedDistros(_ distros: Set<String>) -> [String] {
-        IRBuilder.modernDistros.filter { distros.contains($0) || $0 == "jazzy" }
     }
 
     /// Oracle sample files for every emitted message, service half and action

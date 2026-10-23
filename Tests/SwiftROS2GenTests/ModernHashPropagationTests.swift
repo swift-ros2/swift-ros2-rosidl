@@ -173,4 +173,106 @@ struct ModernHashPropagationTests {
         }
         #expect(MultiDistroFixture.hashes(in: mergedFiles["FixtureMsgs/Plan.swift"]!).count == 2)
     }
+
+    /// `dep_msgs/Plan` read for Jazzy (`speed`), Kilted and Lyrical (`speed`, `k`), and
+    /// `fixture_msgs` (a message, a service and an action that hold a `Plan`) read for Jazzy and
+    /// Lyrical only, or for the given distributions.
+    static func splitReadPackages(
+        holder: [String] = ["jazzy", "lyrical"], plan: [String] = ["jazzy", "kilted", "lyrical"]
+    )
+        -> [String: [String: [String: String]]]
+    {
+        var plans: [String: [String: String]] = [:]
+        for distro in plan {
+            plans[distro] = ["msg/Plan.msg": distro == "jazzy" ? "float64 speed\n" : "float64 speed\nfloat64 k\n"]
+        }
+        var holders: [String: [String: String]] = [:]
+        for distro in holder {
+            holders[distro] = [
+                "msg/Holder.msg": "dep_msgs/Plan plan\n",
+                "srv/Use.srv": "dep_msgs/Plan plan\n---\nbool ok\n",
+                "action/Run.action": "dep_msgs/Plan plan\n---\nint32 code\n---\nfloat32 progress\n",
+            ]
+        }
+        return ["dep_msgs": plans, "fixture_msgs": holders]
+    }
+
+    @Test("a type read for fewer distributions than a type it holds gets that type's hashes")
+    func holderReadForFewerDistributions() throws {
+        // Kilted encodes Plan.k (the Plan IDL read for Kilted has it), so the Kilted hash of
+        // every type that holds a Plan must include it, although fixture_msgs was not read for
+        // Kilted.
+        let merged = try MultiDistroFixture(packages: Self.splitReadPackages())
+        defer { merged.remove() }
+        let files = try merged.generate()
+        var single: [String: [String: String]] = [:]
+        for distro in ["jazzy", "kilted"] {
+            let fixture = try MultiDistroFixture(packages: Self.splitReadPackages(holder: [distro], plan: [distro]))
+            defer { fixture.remove() }
+            single[distro] = try fixture.generate()
+        }
+        for path in [
+            "FixtureMsgs/Holder.swift", "FixtureMsgs/UseSrv.swift", "FixtureMsgs/UseRequest.swift",
+            "FixtureMsgs/RunAction.swift",
+        ] {
+            let source = try #require(files[path], "\(path)")
+            let jazzy = MultiDistroFixture.hashes(in: try #require(single["jazzy"]?[path]))
+            let kilted = MultiDistroFixture.hashes(in: try #require(single["kilted"]?[path]))
+            #expect(source.contains("distro >= .kilted {"), "\(path)")
+            #expect(!source.contains("distro >= .lyrical {"), "\(path)")
+            #expect(Set(MultiDistroFixture.hashes(in: source)) == Set(jazzy + kilted), "\(path)")
+        }
+        // The Kilted hash is the one RIHS01 gives the merged Holder projected onto Kilted.
+        let collected = try Pipeline.collect(merged.runs)
+        let holder = try #require(collected.unresolvedIRs.first { $0.ir.rosTypeName == "fixture_msgs/msg/Holder" })
+        let kiltedHash = RIHS01.hash(holder.ir, for: "kilted", registry: collected.registry)
+        #expect(
+            files["FixtureMsgs/Holder.swift"]!.contains(
+                "        } else if distro >= .kilted {\n            typeHash = \"\(kiltedHash)\""))
+    }
+
+    @Test("a distribution in which a message has no fields writes and reads the sentinel byte")
+    func emptyShapeGetsSentinel() throws {
+        let fixture = try MultiDistroFixture(MultiDistroFixture.growing)
+        defer { fixture.remove() }
+        let grow = try #require(try fixture.generate()["FixtureMsgs/Grow.swift"])
+        #expect(
+            grow.contains(
+                "        if encoder.schemaDistro >= .jazzy && encoder.schemaDistro < .lyrical {\n"
+                    + "            encoder.writeUInt8(0)\n        }\n    }\n"))
+        #expect(
+            grow.contains(
+                "        if decoder.schemaDistro >= .jazzy && decoder.schemaDistro < .lyrical {\n"
+                    + "            _ = try decoder.readUInt8()\n        }\n    }\n"))
+        // The Jazzy hash is the one of the empty message (with the sentinel field).
+        var single: [String: String] = [:]
+        for (distro, body) in [("jazzy", "\n"), ("lyrical", "float64 x\n")] {
+            let one = try MultiDistroFixture([distro: ["msg/Grow.msg": body]])
+            defer { one.remove() }
+            single[distro] = try #require(
+                MultiDistroFixture.hashes(in: try one.generate()["FixtureMsgs/Grow.swift"]!).first)
+        }
+        #expect(
+            grow.contains("        } else if distro >= .lyrical {\n            typeHash = \"\(single["lyrical"]!)\""))
+        #expect(grow.contains("        } else {\n            typeHash = \"\(single["jazzy"]!)\""))
+
+        // A field split at Humble only: the Humble-only field leaves Jazzy and later empty.
+        let split = try MultiDistroFixture(["humble": ["msg/Gone.msg": "int32 old\n"], "jazzy": ["msg/Gone.msg": "\n"]])
+        defer { split.remove() }
+        let gone = try #require(try split.generate()["FixtureMsgs/Gone.swift"])
+        #expect(gone.contains("        if !encoder.isLegacySchema {\n            encoder.writeUInt8(0)\n        }\n"))
+        #expect(
+            gone.contains("        if !decoder.isLegacySchema {\n            _ = try decoder.readUInt8()\n        }\n"))
+    }
+
+    @Test("the CDR tests compile the generated Grow")
+    func cdrGrowFixtureIsGenerated() throws {
+        let fixture = try MultiDistroFixture(MultiDistroFixture.growing)
+        defer { fixture.remove() }
+        let generated = try #require(try fixture.generate()["FixtureMsgs/Grow.swift"])
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("SwiftROS2CDRTests/Fixtures/Grow.swift")
+        #expect(try String(contentsOf: url, encoding: .utf8) == generated)
+    }
 }

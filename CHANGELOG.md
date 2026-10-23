@@ -9,14 +9,15 @@
   distributions have is written and read only for them (`encoder.schemaDistro >= .lyrical`),
   is decoded as its IDL default elsewhere, and says so in its doc comment. A message, service
   or action whose hash differs among distributions, including one that only reaches such a
-  type, gets `typeInfo(for:)` with one hash per change; `typeInfo` stays the Jazzy one. A
+  type (even one read for more distributions than the type itself), gets `typeInfo(for:)` with
+  one hash per change; `typeInfo` stays the Jazzy one. A
   distribution with no IDL passed (Rolling) takes the newest passed distribution that is not
   newer (`IRBuilder.schemaDistro(for:read:)`). Types that differ only on Humble generate as
   before.
 - `ROS2Distro` is `Comparable` in release order, Rolling greatest.
-- `CDREncoder(distro:)`, `CDRDecoder(data:distro:)` and `schemaDistro` on both, with
-  `schemaDistroName` and initializers taking it in `SwiftROS2CDR`. The existing initializers
-  keep the 1.0 behaviour (Humble when legacy, otherwise Jazzy).
+- `CDREncoder(distro:)`, `CDRDecoder(data:distro:)` and `schemaDistro` on both, and
+  `schemaDistroName` in `SwiftROS2CDR`. The existing initializers keep the 1.0 behaviour
+  (Humble when legacy, otherwise Jazzy).
 - `typeInfo(for:)` requirements on `ROS2MessageType`, `ROS2ServiceType` and `ROS2Action`, with
   default implementations that return `typeInfo` without its hashes on Humble, and
   `withoutTypeHashes` on the three type info structs. swift-ros2 needs them to send the
@@ -33,6 +34,10 @@
   that gives its shape (see above) when asked for a distribution it was not read for.
 
 ### Fixed
+
+- A message with no fields in some distributions writes and reads rosidl's
+  `structure_needs_at_least_one_member` byte in exactly those distributions (Humble splits
+  included), matching its hash; the codec wrote nothing there.
 
 - A field a later distribution adds in the middle of a message is placed where that
   distribution has it, not at the end.

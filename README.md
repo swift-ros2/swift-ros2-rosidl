@@ -141,12 +141,22 @@ generated type knows the field layout and the hash of each distribution you pass
 - **What a distribution you did not pass gets.** A distribution takes the layout and the hash
   of the newest distribution you passed that is not newer than it, else of the oldest you
   passed: Rolling without Rolling IDL gets Lyrical's, and an unread Kilted between Jazzy and
-  Lyrical gets Jazzy's. Pass every distribution you deploy against.
+  Lyrical gets Jazzy's. Each package follows its own set, so a type read for fewer
+  distributions than a type it holds still gets that type's hash on every distribution.
+- **Pass every distribution you deploy against, for your package and its dependencies.** The
+  hashes of your types include those of the dependency types they hold, as you pass them. A
+  package generated against a dependency must pass the dependency's IDL for the same
+  distributions the dependency was generated with. For example, generating a package that holds
+  `moveit_msgs/MotionPlanRequest` with moveit_msgs passed only `@lyrical` gives every
+  distribution the Lyrical `MotionPlanRequest` hash, while a swift-ros2-extra-interfaces
+  `MotionPlanRequest` generated from Jazzy, Kilted and Lyrical encodes the Jazzy layout on Jazzy:
+  the hashes then do not match what is sent.
 - **What is rejected.** A field must exist in one contiguous run of the distributions passed
   (not in Jazzy and Lyrical but missing from Kilted); fields both distributions have must be in
   the same order; a field's type (bound included) must not change; and a `.srv` or `.action`
   file must be the same in every distribution (one that only references a changed message is
-  fine). Renaming a field reads as removing one and adding another.
+  fine). Renaming a field reads as removing one and adding another. A distribution in which a
+  message has no fields writes and reads rosidl's one-byte placeholder there, as rosidl does.
 
 A program sends the layout and the hash of the distribution it runs against only with a
 swift-ros2 that asks generated types for `typeInfo(for:)` and creates codecs with

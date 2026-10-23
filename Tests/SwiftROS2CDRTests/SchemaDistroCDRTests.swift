@@ -152,6 +152,28 @@ struct SchemaDistroCDRTests {
         #expect([jazzy, kilted, lyrical].allSatisfy { $0?.hasPrefix("RIHS01_") == true })
     }
 
+    @Test("a distribution in which a message has no fields writes and reads one zero byte")
+    func emptyShapeSentinel() throws {
+        // `Fixtures/Grow.swift`: `old` on Humble, nothing on Jazzy and Kilted, `x` on Lyrical.
+        let header: [UInt8] = [0x00, 0x01, 0x00, 0x00]
+        let value = Grow(old: 3, x: -2.25)
+        let expected: [ROS2Distro: [UInt8]] = [
+            .humble: header + [0x03, 0x00, 0x00, 0x00],
+            .jazzy: header + [0x00],
+            .kilted: header + [0x00],
+            .lyrical: header + withUnsafeBytes(of: (-2.25).bitPattern.littleEndian) { Array($0) },
+        ]
+        for (distro, bytes) in expected {
+            let encoder = CDREncoder(distro: distro)
+            encoder.writeEncapsulationHeader()
+            try value.encode(to: encoder)
+            #expect(Array(encoder.getData()) == bytes, "\(distro)")
+            let decoder = try CDRDecoder(data: Data(bytes), distro: distro)
+            _ = try Grow(from: decoder)
+            #expect(decoder.remainingBytes == 0, "\(distro)")
+        }
+    }
+
     @Test("a type's own typeInfo(for:) is what generic code gets")
     func ownTypeInfoWitness() {
         #expect(messageInfo(PerDistroFixture.self, .jazzy).typeHash == "RIHS01_jazzy")
