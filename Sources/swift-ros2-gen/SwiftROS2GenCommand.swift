@@ -71,9 +71,9 @@ struct SwiftROS2GenCommand: ParsableCommand {
         help: """
             Comma-separated distro allow-list for --verify-hashes (default: all distros derived from --input \
             except 'humble', which has no rosidl type-hash JSON). Each distro must match the tag the Docker image \
-            is pulled from (e.g. 'jazzy,kilted,lyrical,rolling'). Every --input distro is still read, so the \
-            merged types are checked; a distro no --input has (e.g. 'rolling') is checked with the shape of the \
-            newest --input distro not newer than it, as the generated code uses it.
+            is pulled from (e.g. 'jazzy,kilted,lyrical,rolling'). Every --input distro is still read, and every \
+            type is checked with the hash its generated typeInfo(for:) returns; on a distro its package was not \
+            read for (e.g. 'rolling') with the shape of the newest distro read for the package not newer than it.
             """
     )
     var distros: String?

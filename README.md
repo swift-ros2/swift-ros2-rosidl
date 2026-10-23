@@ -279,10 +279,12 @@ swift run swift-ros2-gen \
 
 `--distros` selects the distributions to check. The default is every distribution of the
 inputs except Humble, and each one must be the distribution of the image. Every `--input`
-distribution is still read, so pass the same inputs you generate from: the hashes checked are
-those the merged types carry. A distribution none of the inputs has, such as `rolling`, is
-checked as generated types treat it, with the shape of the newest input distribution that is
-not newer (see [Distributions](#distributions)). `--diagnose` writes the oracle JSON of a
+distribution is still read, so pass the same inputs you generate from: every type is checked
+on every selected distribution with the hash its generated `typeInfo(for:)` returns there. A
+distribution a package was not read for, such as `rolling`, is checked as generated types
+treat it, with the shape of the newest distribution read for the package that is not newer
+(see [Distributions](#distributions)); a type missing from a distribution its package was read
+for is skipped there. `--diagnose` writes the oracle JSON of a
 mismatch under `/tmp/swift-ros2-gen-diagnose/`.
 
 ### The build plugin

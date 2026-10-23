@@ -35,9 +35,11 @@
   between two that have it; any other difference among modern distributions is supported.
 - `RIHS01.hash(_:for:registry:)` projects a merged type onto the distribution it was read for
   that gives its shape (see above) when asked for a distribution it was not read for.
-- `swift-ros2-gen --verify-hashes --distros <d>` reads every `--input` distribution, so it
-  checks the hashes of the merged types, and checks a distribution no input has (Rolling) with
-  the shape generated types give it. The `interface-oracles.yml` hash oracle passes every
+- `swift-ros2-gen --verify-hashes --distros <d>` reads every `--input` distribution and checks
+  every type on every selected distribution (default: every distribution of the inputs but
+  Humble) with the hash its generated `typeInfo(for:)` returns there, including distributions
+  its package was not read for (Rolling); a type missing from a distribution its package was
+  read for is skipped there. The `interface-oracles.yml` hash oracle passes every
   generated distribution (`Scripts/generator-args.sh` without an argument) with
   `--distros <row>`, so it verifies the hashes the generated code carries rather than one
   distribution's IDL alone.

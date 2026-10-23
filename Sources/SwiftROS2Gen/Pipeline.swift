@@ -759,9 +759,13 @@ extension Pipeline {
     ///
     /// Pass every distribution the generated code was made from, so the plan checks the merged
     /// projection the generated types carry, and select the distributions to check with
-    /// `distros`. A selected distribution no emitted run was read for (Rolling without Rolling
-    /// IDL) is checked as the generated code treats it: the types of its schema distribution
-    /// (``IRBuilder/schemaDistro(for:read:)``), with their hashes for it, labelled with it.
+    /// `distros` (default: every distribution of the emitted runs except Humble). Each type is
+    /// checked on every selected distribution with the hash its generated `typeInfo(for:)`
+    /// returns there (the same projection). A distribution the type's package was read for but
+    /// whose IDL lacks the type is skipped; a distribution the package was not read for
+    /// (Rolling without Rolling IDL, or a distribution only other packages were read for) is
+    /// checked when the type's schema distribution there (``IRBuilder/schemaDistro(for:read:)``
+    /// over the package's distributions) has it, labelled with the selected distribution.
     public static func buildVerifyPlan(
         _ runs: [PackageRun],
         distros allowedDistros: Set<String>? = nil
@@ -769,31 +773,31 @@ extension Pipeline {
         // Reuse the multi-package gather + register sequence of generateMulti so
         // cross-package nested references resolve.
         let c = try collect(runs)
-        // A requested distribution no run read (Rolling, without Rolling IDL) is checked like
-        // the generated code treats it: each type its schema distribution has, with the hash
-        // projected onto it, labelled with the requested distribution so the oracle JSON comes
-        // from that distribution's install.
-        let readDistros = Set(runs.filter(\.emit).map(\.input.distro))
-        func verifiedDistros(_ typeDistros: Set<String>) -> [String] {
-            guard let allowedDistros else { return typeDistros.filter { $0 != "humble" }.sorted() }
-            return allowedDistros.filter { distro in
-                guard distro != "humble" else { return false }
-                if readDistros.contains(distro) { return typeDistros.contains(distro) }
-                return typeDistros.contains(IRBuilder.schemaDistro(for: distro, read: readDistros))
+        // A selected distribution the type's package was not read for is checked as the
+        // generated code treats it: the type of its schema distribution, with the hash projected
+        // onto the selected distribution (each contained type with its own read set, exactly as
+        // `generateMulti` computes the `typeInfo(for:)` ladder), labelled with the selected
+        // distribution so the oracle JSON comes from that distribution's install.
+        var packageDistros: [String: Set<String>] = [:]
+        for run in runs { packageDistros[run.input.name, default: []].insert(run.input.distro) }
+        let selected = (allowedDistros ?? Set(runs.filter(\.emit).map(\.input.distro))).filter { $0 != "humble" }
+        func verifiedDistros(_ typeDistros: Set<String>, package: String) -> [String] {
+            let read = packageDistros[package] ?? typeDistros
+            return selected.filter { distro in
+                if typeDistros.contains(distro) { return true }
+                // The package was read for `distro` and its IDL there has no such type.
+                if read.contains(distro) { return false }
+                return typeDistros.contains(IRBuilder.schemaDistro(for: distro, read: read))
             }.sorted()
         }
 
-        // For each distro the caller asked about (default: every distro whose IDL
-        // has the type), compute the per-distro hash and emit one VerifyPlanEntry
-        // per (ir, distro) pair. A type is in scope only for the distributions
-        // whose IDL has it (``CollectedIR/distros``): a single run's own
-        // distribution, or for a package read from several distributions the ones
-        // that have the message, service or action.
+        // For each selected distro compute the per-distro hash and emit one VerifyPlanEntry per
+        // (ir, distro) pair, following ``CollectedIR/distros`` as above.
         var out: [VerifyPlanEntry] = []
         for entry in c.unresolvedIRs {
             // Humble does not have a hash oracle; rosidl pre-RIHS01. It is skipped silently to
             // keep the verify-mode focused on the distros the rosidl `.json` files exist for.
-            for distro in verifiedDistros(entry.distros) {
+            for distro in verifiedDistros(entry.distros, package: entry.ir.package) {
                 let hash = RIHS01.hash(entry.ir, for: distro, registry: c.registry)
                 out.append(
                     VerifyPlanEntry(
@@ -834,7 +838,7 @@ extension Pipeline {
             }
         }
         for (ir, topLevel, irDistros) in synthesized {
-            for distro in verifiedDistros(irDistros) {
+            for distro in verifiedDistros(irDistros, package: ir.package) {
                 out.append(
                     VerifyPlanEntry(
                         package: ir.package, kind: ir.kind, typeName: ir.typeName, topLevelTypeName: topLevel,

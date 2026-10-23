@@ -158,6 +158,35 @@ struct PipelineDistroPresenceTests {
         #expect(jazzyHashes["fixture_msgs/action/Move_SendGoal"] != lyricalHashes["fixture_msgs/action/Move_SendGoal"])
     }
 
+    @Test("the verify plan checks every hash the generated typeInfo(for:) returns")
+    func verifyPlanCoversEmittedHashes() throws {
+        // fixture_msgs is read for Jazzy and Lyrical only and holds dep_msgs/Plan, which Kilted
+        // changes: its Kilted hashes exist only through the projection and must be checked too.
+        let fixture = try MultiDistroFixture(packages: ModernHashPropagationTests.splitReadPackages())
+        defer { fixture.remove() }
+        let modern = Set(IRBuilder.modernDistros)
+        let plan = try Pipeline.buildVerifyPlan(fixture.runs, distros: modern)
+        var planned: [String: [String: String]] = [:]
+        for entry in plan { planned[entry.rosTypeName, default: [:]][entry.distro] = entry.expectedHash }
+        let holder = try #require(planned["fixture_msgs/msg/Holder"])
+        #expect(Set(holder.keys) == modern)
+        #expect(holder["kilted"] != holder["jazzy"])
+        #expect(holder["kilted"] == holder["lyrical"])
+        #expect(planned["fixture_msgs/srv/Use"]?.keys.sorted() == modern.sorted())
+        #expect(planned["fixture_msgs/action/Run_SendGoal_Request"]?.keys.sorted() == modern.sorted())
+
+        // Every hash in every generated file is one the plan checks, on the distributions
+        // whose `typeInfo(for:)` returns it.
+        let checked = Set(plan.map(\.expectedHash))
+        for (path, source) in try fixture.generate() where path.hasPrefix("FixtureMsgs/") {
+            for hash in MultiDistroFixture.hashes(in: source) {
+                #expect(checked.contains(hash), "\(path): \(hash) is not verified")
+            }
+        }
+        // Without --distros, every distribution of the run is checked.
+        #expect(Set(try Pipeline.buildVerifyPlan(fixture.runs).map(\.distro)) == ["jazzy", "kilted", "lyrical"])
+    }
+
     @Test("an action that differs between distributions is rejected")
     func divergentActionIsRejected() throws {
         let package = try SplitPackage()
