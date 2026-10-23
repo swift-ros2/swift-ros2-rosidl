@@ -16,6 +16,12 @@ public struct ROS2MessageTypeInfo: Sendable {
         self.typeName = typeName
         self.typeHash = typeHash
     }
+
+    /// The same type name with no type hash, as the type is advertised on a distribution
+    /// without RIHS01 hashes (Humble).
+    public var withoutTypeHashes: ROS2MessageTypeInfo {
+        ROS2MessageTypeInfo(typeName: typeName, typeHash: nil)
+    }
 }
 
 /// Type information for a ROS 2 service
@@ -60,6 +66,13 @@ public struct ROS2ServiceTypeInfo: Sendable {
         self.requestTypeHash = requestTypeHash
         self.responseTypeHash = responseTypeHash
         self.serviceTypeHash = serviceTypeHash
+    }
+
+    /// The same names with every type hash `nil`, as the service is advertised on a
+    /// distribution without RIHS01 hashes (Humble).
+    public var withoutTypeHashes: ROS2ServiceTypeInfo {
+        ROS2ServiceTypeInfo(
+            serviceName: serviceName, requestTypeName: requestTypeName, responseTypeName: responseTypeName)
     }
 }
 
@@ -126,6 +139,15 @@ public struct ROS2ActionTypeInfo: Sendable {
         self.sendGoalServiceTypeHash = sendGoalServiceTypeHash
         self.getResultServiceTypeHash = getResultServiceTypeHash
     }
+
+    /// The same action name with every type hash `nil`, as the action is advertised on a
+    /// distribution without RIHS01 hashes (Humble).
+    public var withoutTypeHashes: ROS2ActionTypeInfo {
+        ROS2ActionTypeInfo(
+            actionName: actionName, goalTypeHash: nil, resultTypeHash: nil, feedbackTypeHash: nil,
+            sendGoalRequestTypeHash: nil, sendGoalResponseTypeHash: nil, getResultRequestTypeHash: nil,
+            getResultResponseTypeHash: nil, feedbackMessageTypeHash: nil)
+    }
 }
 
 // MARK: - CDR Protocols
@@ -147,7 +169,20 @@ public typealias CDRCodable = CDREncodable & CDRDecodable
 
 /// Base protocol for ROS 2 message types
 public protocol ROS2MessageType: Sendable {
+    /// The type name and the type hash of the default schema (Jazzy and later).
     static var typeInfo: ROS2MessageTypeInfo { get }
+
+    /// The type name and the type hash this type has on the wire for `distro`: `nil` hash where
+    /// `distro` has no RIHS01 hashes (Humble). A type whose fields differ among distributions
+    /// returns each distribution's hash; every other type has the default implementation.
+    static func typeInfo(for distro: ROS2Distro) -> ROS2MessageTypeInfo
+}
+
+extension ROS2MessageType {
+    /// ``typeInfo``, without its hash where `distro` has no RIHS01 hashes (Humble).
+    public static func typeInfo(for distro: ROS2Distro) -> ROS2MessageTypeInfo {
+        distro.supportsTypeHash ? typeInfo : typeInfo.withoutTypeHashes
+    }
 }
 
 /// A message type that supports both publish and subscribe
@@ -159,7 +194,22 @@ public typealias ROS2Message = ROS2MessageType & CDRCodable
 public protocol ROS2ServiceType: Sendable {
     associatedtype Request: CDRCodable & Sendable
     associatedtype Response: CDRCodable & Sendable
+    /// The service, request and response names and hashes of the default schema (Jazzy and
+    /// later).
     static var typeInfo: ROS2ServiceTypeInfo { get }
+
+    /// The names and hashes this service has on the wire for `distro`: `nil` hashes where
+    /// `distro` has no RIHS01 hashes (Humble). A service whose request or response differs among
+    /// distributions returns each distribution's hashes; every other service has the default
+    /// implementation.
+    static func typeInfo(for distro: ROS2Distro) -> ROS2ServiceTypeInfo
+}
+
+extension ROS2ServiceType {
+    /// ``typeInfo``, without its hashes where `distro` has no RIHS01 hashes (Humble).
+    public static func typeInfo(for distro: ROS2Distro) -> ROS2ServiceTypeInfo {
+        distro.supportsTypeHash ? typeInfo : typeInfo.withoutTypeHashes
+    }
 }
 
 // MARK: - Action Protocol
@@ -169,7 +219,21 @@ public protocol ROS2Action: Sendable {
     associatedtype Goal: CDRCodable & Sendable
     associatedtype Result: CDRCodable & Sendable
     associatedtype Feedback: CDRCodable & Sendable
+    /// The action name and the hashes of the default schema (Jazzy and later).
     static var typeInfo: ROS2ActionTypeInfo { get }
+
+    /// The action name and the hashes this action has on the wire for `distro`: `nil` hashes
+    /// where `distro` has no RIHS01 hashes (Humble). An action whose goal, result or feedback
+    /// differs among distributions returns each distribution's hashes; every other action has
+    /// the default implementation.
+    static func typeInfo(for distro: ROS2Distro) -> ROS2ActionTypeInfo
+}
+
+extension ROS2Action {
+    /// ``typeInfo``, without its hashes where `distro` has no RIHS01 hashes (Humble).
+    public static func typeInfo(for distro: ROS2Distro) -> ROS2ActionTypeInfo {
+        distro.supportsTypeHash ? typeInfo : typeInfo.withoutTypeHashes
+    }
 }
 
 // MARK: - CDR Serialization Errors

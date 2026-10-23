@@ -1,0 +1,9 @@
+# API breakages accepted against the latest 1.x release, one literal digester message per line.
+#
+# 1.1: typeInfo(for:) is a new requirement of the three protocols so swift-ros2 can ask any type
+# for its per-distribution names and hashes. Source-compatible: every conformer gets the default
+# implementation in SwiftROS2Messages. Some digester versions report a requirement added with a
+# default as a breakage and some do not; these lines cover the ones that do.
+API breakage: func ROS2MessageType.typeInfo(for:) has been added as a protocol requirement
+API breakage: func ROS2ServiceType.typeInfo(for:) has been added as a protocol requirement
+API breakage: func ROS2Action.typeInfo(for:) has been added as a protocol requirement
