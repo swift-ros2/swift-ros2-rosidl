@@ -98,6 +98,60 @@ struct SchemaDistroCDRTests {
         }
     }
 
+    /// `Fixtures/ModernVarying.swift` (the generator's golden output): `sinceJazzy` from Jazzy
+    /// on, `kiltedOnly` (IDL default 7) in Kilted alone, `untilLyrical` before Lyrical and
+    /// `sinceLyrical` from Lyrical on.
+    private let varying = ModernVarying(
+        a: 1, sinceJazzy: 1.5, kiltedOnly: 9, untilLyrical: "x", sinceLyrical: -2.25)
+
+    private func encode(_ value: ModernVarying, _ encoder: CDREncoder) throws -> Data {
+        encoder.writeEncapsulationHeader()
+        try value.encode(to: encoder)
+        return encoder.getData()
+    }
+
+    @Test("a since-Lyrical field is skipped on Jazzy and Kilted and written on Lyrical and Rolling")
+    func sinceLyricalField() throws {
+        let minusTwoPointTwoFive = withUnsafeBytes(of: (-2.25).bitPattern.littleEndian) { Data($0) }
+        // Header 4 + int32 a, then: Humble string "x" (4 + 2); Jazzy float32 + string; Kilted
+        // float32 + uint8 + 3 padding + string; Lyrical and Rolling float32 + float64.
+        let expectedCount: [ROS2Distro: Int] = [.humble: 14, .jazzy: 18, .kilted: 22, .lyrical: 20, .rolling: 20]
+        for distro in ROS2Distro.allCases {
+            let bytes = try encode(varying, CDREncoder(distro: distro))
+            #expect(bytes.count == expectedCount[distro], "\(distro)")
+            #expect((bytes.suffix(8) == minusTwoPointTwoFive) == (distro >= .lyrical), "\(distro)")
+
+            let decoded = try ModernVarying(from: CDRDecoder(data: bytes, distro: distro))
+            #expect(decoded.a == 1)
+            #expect(decoded.sinceJazzy == (distro >= .jazzy ? 1.5 : 0.0), "\(distro)")
+            #expect(decoded.kiltedOnly == (distro == .kilted ? 9 : 7), "\(distro)")
+            #expect(decoded.untilLyrical == (distro < .lyrical ? "x" : ""), "\(distro)")
+            #expect(decoded.sinceLyrical == (distro >= .lyrical ? -2.25 : 0.0), "\(distro)")
+        }
+    }
+
+    @Test("a Jazzy-shaped payload decodes with the field at its default")
+    func jazzyPayloadDecodesDefaults() throws {
+        // A default encoder writes the Jazzy shape, as in 1.0.
+        let bytes = try encode(varying, CDREncoder())
+        #expect(bytes == (try encode(varying, CDREncoder(distro: .jazzy))))
+        let decoded = try ModernVarying(from: CDRDecoder(data: bytes))
+        #expect(
+            decoded == ModernVarying(a: 1, sinceJazzy: 1.5, kiltedOnly: 7, untilLyrical: "x", sinceLyrical: 0.0))
+    }
+
+    @Test("a type whose hash differs among distributions reports each one")
+    func varyingTypeInfo() {
+        let jazzy = ModernVarying.typeInfo(for: .jazzy).typeHash
+        let kilted = ModernVarying.typeInfo(for: .kilted).typeHash
+        let lyrical = ModernVarying.typeInfo(for: .lyrical).typeHash
+        #expect(ModernVarying.typeInfo(for: .humble).typeHash == nil)
+        #expect(ModernVarying.typeInfo.typeHash == jazzy)
+        #expect(messageInfo(ModernVarying.self, .rolling).typeHash == lyrical)
+        #expect(Set([jazzy, kilted, lyrical]).count == 3)
+        #expect([jazzy, kilted, lyrical].allSatisfy { $0?.hasPrefix("RIHS01_") == true })
+    }
+
     @Test("a type's own typeInfo(for:) is what generic code gets")
     func ownTypeInfoWitness() {
         #expect(messageInfo(PerDistroFixture.self, .jazzy).typeHash == "RIHS01_jazzy")

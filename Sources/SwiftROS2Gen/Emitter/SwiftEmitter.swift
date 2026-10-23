@@ -59,6 +59,8 @@ public enum SwiftEmitter {
         nestedNameOverrides: [String: String]
     ) -> String {
         let conditional = !isNested && isConditional(ir)
+        let read = readDistros(ir)
+        let ladder = isNested ? [] : modernLadder(ir.perDistroHashes, read: Set(ir.perDistroFieldPresence.keys))
         var out = ""
         out += "/// \(ir.rosTypeName)\n"
         let structName = structNameOverride ?? swiftStructName(typeName: ir.typeName)
@@ -68,7 +70,10 @@ public enum SwiftEmitter {
 
         var preludeEmitted = false
         if !isNested {
-            if conditional {
+            if ladder.count > 1 {
+                out += emitTypeInfoLadder(ir, ladder: ladder)
+                preludeEmitted = true
+            } else if conditional {
                 out += emitTypeInfoFactory(ir)
                 preludeEmitted = true
             } else {
@@ -128,6 +133,7 @@ public enum SwiftEmitter {
                 if let comment = boundedComment(field.type) {
                     out += "    \(comment)\n"
                 }
+                out += availabilityDoc(field, read: read, nestedNameOverrides: nestedNameOverrides, indent: "    ")
                 let typeName = swiftType(field.type, nestedNameOverrides: nestedNameOverrides)
                 out += "    public var \(field.swiftName): \(typeName)\n"
             }
@@ -154,14 +160,14 @@ public enum SwiftEmitter {
             out += "\n"
             out += "    public func encode(to encoder: CDREncoder) throws {\n"
             for field in ir.fields {
-                out += emitEncodeWithAvailability(field)
+                out += emitEncodeWithAvailability(field, read: read)
             }
             out += "    }\n"
             out += "\n"
             out += "    public init(from decoder: CDRDecoder) throws {\n"
             for field in ir.fields {
                 out += emitDecodeWithAvailability(
-                    field, nestedNameOverrides: nestedNameOverrides)
+                    field, nestedNameOverrides: nestedNameOverrides, read: read)
             }
             out += "    }\n"
         }
@@ -188,6 +194,72 @@ public enum SwiftEmitter {
         sourceLabel: String,
         moduleNames: ModuleNames = [:]
     ) -> String {
+        var typeInfo = ""
+        typeInfo += "    public static let typeInfo = ROS2ServiceTypeInfo(\n"
+        typeInfo += serviceInfoArguments(
+            package: package, serviceTypeName: serviceTypeName,
+            hashes: ServiceHashes(requestHash: requestHash, responseHash: responseHash, serviceHash: serviceHash),
+            indent: "        ")
+        typeInfo += "    )\n"
+        return serviceUmbrella(
+            package: package, serviceTypeName: serviceTypeName, umbrellaName: umbrellaName,
+            requestStructName: requestStructName, responseStructName: responseStructName,
+            typeInfo: typeInfo, sourceLabel: sourceLabel, moduleNames: moduleNames)
+    }
+
+    /// Render a `ROS2ServiceType` umbrella enum from the hashes of each distribution
+    /// (`hashesByDistro`, keyed by distribution name, with at least `"jazzy"`).
+    ///
+    /// When every modern distribution has the same hashes, this is
+    /// ``emitServiceUmbrella(package:serviceTypeName:umbrellaName:requestStructName:responseStructName:requestHash:responseHash:serviceHash:sourceLabel:moduleNames:)``
+    /// with the Jazzy hashes. Otherwise the umbrella gets `typeInfo(for:)`, returning one
+    /// ``ROS2ServiceTypeInfo`` per change of hashes in release order (a distribution not in
+    /// `hashesByDistro` takes those of its schema distribution, see
+    /// ``IRBuilder/schemaDistro(for:read:)``), and `typeInfo` returns the Jazzy one.
+    public static func emitServiceUmbrella(
+        package: String,
+        serviceTypeName: String,
+        umbrellaName: String,
+        requestStructName: String,
+        responseStructName: String,
+        hashesByDistro: [String: ServiceHashes],
+        sourceLabel: String,
+        moduleNames: ModuleNames = [:]
+    ) -> String {
+        let ladder = modernLadder(hashesByDistro, read: [])
+        guard ladder.count > 1 else {
+            let hashes =
+                hashesByDistro["jazzy"] ?? ladder.first?.value
+                ?? ServiceHashes(requestHash: nil, responseHash: nil, serviceHash: nil)
+            return emitServiceUmbrella(
+                package: package, serviceTypeName: serviceTypeName, umbrellaName: umbrellaName,
+                requestStructName: requestStructName, responseStructName: responseStructName,
+                requestHash: hashes.requestHash, responseHash: hashes.responseHash,
+                serviceHash: hashes.serviceHash, sourceLabel: sourceLabel, moduleNames: moduleNames)
+        }
+        let typeInfo = emitInfoLadder(
+            infoType: "ROS2ServiceTypeInfo", ladder: ladder,
+            arguments: { hashes, indent in
+                serviceInfoArguments(
+                    package: package, serviceTypeName: serviceTypeName, hashes: hashes, indent: indent)
+            })
+        return serviceUmbrella(
+            package: package, serviceTypeName: serviceTypeName, umbrellaName: umbrellaName,
+            requestStructName: requestStructName, responseStructName: responseStructName,
+            typeInfo: typeInfo, sourceLabel: sourceLabel, moduleNames: moduleNames)
+    }
+
+    /// A service umbrella file around its `typeInfo` declaration(s).
+    private static func serviceUmbrella(
+        package: String,
+        serviceTypeName: String,
+        umbrellaName: String,
+        requestStructName: String,
+        responseStructName: String,
+        typeInfo: String,
+        sourceLabel: String,
+        moduleNames: ModuleNames
+    ) -> String {
         var out = ""
         out += "// Generated by swift-ros2-gen \u{2014} DO NOT EDIT.\n"
         out += "// Source: \(sourceLabel)\n"
@@ -198,18 +270,50 @@ public enum SwiftEmitter {
         out += "\n"
         out += "/// \(package)/srv/\(serviceTypeName)\n"
         out += "public enum \(umbrellaName): ROS2ServiceType {\n"
-        out += "    public static let typeInfo = ROS2ServiceTypeInfo(\n"
-        out += "        serviceName: \"\(package)/srv/\(serviceTypeName)\",\n"
-        out += "        requestTypeName: \"\(package)/srv/\(serviceTypeName)_Request\",\n"
-        out += "        responseTypeName: \"\(package)/srv/\(serviceTypeName)_Response\",\n"
-        out += "        requestTypeHash: \(swiftOptionalString(requestHash)),\n"
-        out += "        responseTypeHash: \(swiftOptionalString(responseHash)),\n"
-        out += "        serviceTypeHash: \(swiftOptionalString(serviceHash))\n"
-        out += "    )\n"
+        out += typeInfo
         out += "\n"
         out += "    public typealias Request = \(requestStructName)\n"
         out += "    public typealias Response = \(responseStructName)\n"
         out += "}\n"
+        return out
+    }
+
+    /// The argument lines of a `ROS2ServiceTypeInfo(…)` call, each prefixed with `indent`.
+    private static func serviceInfoArguments(
+        package: String, serviceTypeName: String, hashes: ServiceHashes, indent: String
+    ) -> String {
+        [
+            "serviceName: \"\(package)/srv/\(serviceTypeName)\",",
+            "requestTypeName: \"\(package)/srv/\(serviceTypeName)_Request\",",
+            "responseTypeName: \"\(package)/srv/\(serviceTypeName)_Response\",",
+            "requestTypeHash: \(swiftOptionalString(hashes.requestHash)),",
+            "responseTypeHash: \(swiftOptionalString(hashes.responseHash)),",
+            "serviceTypeHash: \(swiftOptionalString(hashes.serviceHash))",
+        ].map { "\(indent)\($0)\n" }.joined()
+    }
+
+    /// `static func typeInfo(for:)` returning one `<infoType>` per step of `ladder` (newest
+    /// first, `withoutTypeHashes` of the Jazzy one where the distribution has no RIHS01 hashes),
+    /// plus `static var typeInfo`, the Jazzy one. `arguments` renders the initializer arguments
+    /// of a step's value at an indent.
+    private static func emitInfoLadder<Value>(
+        infoType: String, ladder: [(since: String, value: Value)],
+        arguments: (Value, String) -> String
+    ) -> String {
+        var out = ""
+        out += "    public static func typeInfo(for distro: ROS2Distro) -> \(infoType) {\n"
+        out += "        if !distro.supportsTypeHash {\n"
+        out += "            return typeInfo(for: .jazzy).withoutTypeHashes\n"
+        for (i, step) in ladder.enumerated().reversed() {
+            out += i == 0 ? "        } else {\n" : "        } else if distro >= .\(step.since) {\n"
+            out += "            return \(infoType)(\n"
+            out += arguments(step.value, "                ")
+            out += "            )\n"
+        }
+        out += "        }\n"
+        out += "    }\n"
+        out += "\n"
+        out += "    public static var typeInfo: \(infoType) { typeInfo(for: .jazzy) }\n"
         return out
     }
 
@@ -240,6 +344,7 @@ public enum SwiftEmitter {
             preconditionFailure(
                 "ActionIR for \(ir.rosActionName) is missing the 'jazzy' hash bundle")
         }
+        let ladder = modernLadder(ir.perDistroHashes, read: [])
 
         // Local overrides so wrappers nest the correct enum-scoped names.
         var overrides = nestedNameOverrides
@@ -269,19 +374,17 @@ public enum SwiftEmitter {
         // Outer ROS2Action enum.
         out += "/// \(ir.rosActionName)\n"
         out += "public enum \(actionEnumName): ROS2Action {\n"
-        out += "    public static let typeInfo = ROS2ActionTypeInfo(\n"
-        out += "        actionName: \"\(ir.rosActionName)\",\n"
-        out += "        goalTypeHash: \"\(hashes.goalHash)\",\n"
-        out += "        resultTypeHash: \"\(hashes.resultHash)\",\n"
-        out += "        feedbackTypeHash: \"\(hashes.feedbackHash)\",\n"
-        out += "        sendGoalRequestTypeHash: \"\(hashes.sendGoalRequestHash)\",\n"
-        out += "        sendGoalResponseTypeHash: \"\(hashes.sendGoalResponseHash)\",\n"
-        out += "        getResultRequestTypeHash: \"\(hashes.getResultRequestHash)\",\n"
-        out += "        getResultResponseTypeHash: \"\(hashes.getResultResponseHash)\",\n"
-        out += "        feedbackMessageTypeHash: \"\(hashes.feedbackMessageHash)\",\n"
-        out += "        sendGoalServiceTypeHash: \(swiftOptionalString(hashes.sendGoalServiceHash)),\n"
-        out += "        getResultServiceTypeHash: \(swiftOptionalString(hashes.getResultServiceHash))\n"
-        out += "    )\n"
+        if ladder.count > 1 {
+            // The goal, result or feedback reaches a type whose fields differ among modern
+            // distributions: one hash bundle per change.
+            out += emitInfoLadder(
+                infoType: "ROS2ActionTypeInfo", ladder: ladder,
+                arguments: { actionInfoArguments(ir, hashes: $0, indent: $1) })
+        } else {
+            out += "    public static let typeInfo = ROS2ActionTypeInfo(\n"
+            out += actionInfoArguments(ir, hashes: hashes, indent: "        ")
+            out += "    )\n"
+        }
         out += "\n"
         out += emitActionInnerStruct(
             name: "Goal", fields: ir.goal.fields,
@@ -316,6 +419,23 @@ public enum SwiftEmitter {
             )
         }
         return out
+    }
+
+    /// The argument lines of a `ROS2ActionTypeInfo(…)` call, each prefixed with `indent`.
+    private static func actionInfoArguments(_ ir: ActionIR, hashes: ActionHashes, indent: String) -> String {
+        [
+            "actionName: \"\(ir.rosActionName)\",",
+            "goalTypeHash: \"\(hashes.goalHash)\",",
+            "resultTypeHash: \"\(hashes.resultHash)\",",
+            "feedbackTypeHash: \"\(hashes.feedbackHash)\",",
+            "sendGoalRequestTypeHash: \"\(hashes.sendGoalRequestHash)\",",
+            "sendGoalResponseTypeHash: \"\(hashes.sendGoalResponseHash)\",",
+            "getResultRequestTypeHash: \"\(hashes.getResultRequestHash)\",",
+            "getResultResponseTypeHash: \"\(hashes.getResultResponseHash)\",",
+            "feedbackMessageTypeHash: \"\(hashes.feedbackMessageHash)\",",
+            "sendGoalServiceTypeHash: \(swiftOptionalString(hashes.sendGoalServiceHash)),",
+            "getResultServiceTypeHash: \(swiftOptionalString(hashes.getResultServiceHash))",
+        ].map { "\(indent)\($0)\n" }.joined()
     }
 
     /// Emit a `Goal` / `Result` / `Feedback` inner struct (CDRCodable, no
@@ -512,10 +632,8 @@ public enum SwiftEmitter {
 
     /// Whether `ir` should emit in distro-conditional mode. True when any
     /// field has non-`.all` availability, OR when the IR carries multiple
-    /// distros with disagreeing hash values. Multi-distro merges that only
-    /// list a subset of the four canonical distros (e.g.
-    /// `["humble", "jazzy"]`) still emit on the simple path — kilted /
-    /// rolling are implicitly treated as same-wire-shape as jazzy.
+    /// distros with disagreeing hash values. A distro the IR has no hash for
+    /// takes the hash of its schema distro (``IRBuilder/schemaDistro(for:read:)``).
     static func isConditional(_ ir: MessageIR) -> Bool {
         if ir.fields.contains(where: { $0.availability != .all }) { return true }
         let normalized = Set(
@@ -524,11 +642,63 @@ public enum SwiftEmitter {
         return normalized.count > 1
     }
 
+    /// The distributions a merged IR was read for, or nil for an IR built from one
+    /// distribution's IDL (whose distro-only fields, if any, keep the Humble / modern split).
+    static func readDistros(_ ir: MessageIR) -> Set<String>? {
+        ir.perDistroFieldPresence.isEmpty ? nil : Set(ir.perDistroFieldPresence.keys)
+    }
+
+    /// The value each modern distribution has, in release order, as steps: each step starts at
+    /// the first distribution whose value differs from the one before. A distribution missing
+    /// from `values` takes the value of its schema distribution among the keys of `values` and
+    /// `read` (``IRBuilder/schemaDistro(for:read:)``); one whose schema distribution has no
+    /// value is skipped. One step means every modern distribution has the same value.
+    static func modernLadder<Value: Equatable>(
+        _ values: [String: Value], read: Set<String>
+    ) -> [(since: String, value: Value)] {
+        let known = Set(values.keys).union(read)
+        var ladder: [(since: String, value: Value)] = []
+        for distro in IRBuilder.modernDistros {
+            let key = values[distro] != nil ? distro : IRBuilder.schemaDistro(for: distro, read: known)
+            guard let value = values[key] else { continue }
+            if let last = ladder.last, last.value == value { continue }
+            ladder.append((distro, value))
+        }
+        return ladder
+    }
+
+    /// Emit `static func typeInfo(for distro:)` with one hash per step of `ladder` (newest
+    /// first, `nil` where the distribution has no RIHS01 hashes) plus the `static var typeInfo`
+    /// shim, for a type whose hash differs among modern distributions. Comparing with the
+    /// distribution where the hash changes keeps the file correct when a distribution is added.
+    static func emitTypeInfoLadder(_ ir: MessageIR, ladder: [(since: String, value: String?)]) -> String {
+        var out = ""
+        out += "    public static func typeInfo(for distro: ROS2Distro) -> ROS2MessageTypeInfo {\n"
+        out += "        let typeHash: String?\n"
+        out += "        if !distro.supportsTypeHash {\n"
+        out += "            typeHash = nil\n"
+        for (i, step) in ladder.enumerated().reversed() {
+            out += i == 0 ? "        } else {\n" : "        } else if distro >= .\(step.since) {\n"
+            out += "            typeHash = \(quotedOrNil(step.value))\n"
+        }
+        out += "        }\n"
+        out += "        return ROS2MessageTypeInfo(\n"
+        out += "            typeName: \"\(ir.rosTypeName)\",\n"
+        out += "            typeHash: typeHash\n"
+        out += "        )\n"
+        out += "    }\n"
+        out += "\n"
+        out += "    public static var typeInfo: ROS2MessageTypeInfo { typeInfo(for: .jazzy) }\n"
+        return out
+    }
+
     /// Emit `static func typeInfo(for distro:)` plus the `static var typeInfo` shim.
     ///
-    /// Generated types know two wire shapes: legacy (Humble) and modern (every later
-    /// distribution, which share one hash). Branching on `isLegacySchema` instead of switching
-    /// over `ROS2Distro` keeps the file compiling when a distribution is added.
+    /// For a type whose modern distributions share one hash, so it differs only on Humble:
+    /// legacy (Humble, no hash) and modern (every later distribution). Branching on
+    /// `isLegacySchema` instead of switching over `ROS2Distro` keeps the file compiling when a
+    /// distribution is added. A type whose hash differs among modern distributions gets
+    /// ``emitTypeInfoLadder(_:ladder:)`` instead.
     static func emitTypeInfoFactory(_ ir: MessageIR) -> String {
         let legacyHash = ir.perDistroHashes["humble"] ?? nil
         let modernHash = IRBuilder.modernDistros.lazy.compactMap { ir.perDistroHashes[$0] ?? nil }.first
@@ -552,90 +722,153 @@ public enum SwiftEmitter {
         return "\"\(v)\""
     }
 
-    /// Encode a field, wrapping the body in a legacy-schema guard when
-    /// availability marks it as distro-conditional.
-    ///
-    /// Two shapes are supported:
-    ///   - "modern-only" (`.onlyIn` includes `"jazzy"`): emit only when
-    ///     `!encoder.isLegacySchema`, mirroring the wire shape of jazzy+.
-    ///   - "legacy-only" (`.onlyIn` is `["humble"]`): emit only when
-    ///     `encoder.isLegacySchema`, so a humble-shaped wire still includes
-    ///     fields that were dropped in jazzy.
-    static func emitEncodeWithAvailability(_ field: FieldIR) -> String {
+    /// Which distributions encode a field that only some distributions have.
+    enum FieldGuard: Equatable {
+        /// Humble only: `isLegacySchema`.
+        case legacyOnly
+        /// Every distribution after Humble: `!isLegacySchema`.
+        case modernOnly
+        /// From `since` (included) up to `until` (excluded), compared with the codec's
+        /// `schemaDistro`; a nil bound is open.
+        case bounded(since: String?, until: String?)
+    }
+
+    /// The guard of a field present in `present` of the distributions `read` (nil for a field
+    /// of a single-distribution IR). `since` is the first read distribution that has the field,
+    /// omitted when the oldest has it; `until` is the first read distribution after them that
+    /// lacks it, omitted when the newest has it. A field split exactly between Humble and
+    /// Jazzy keeps the `isLegacySchema` guard of 1.0.
+    static func fieldGuard(present: Set<String>, read: Set<String>?) -> FieldGuard {
+        precondition(!present.isEmpty, "FieldAvailability.onlyIn must contain at least one distro")
+        let known = Set(IRBuilder.distroOrder)
+        precondition(
+            present.allSatisfy(known.contains),
+            "FieldAvailability.onlyIn contains unknown distro(s): \(present)")
+        guard let read else { return present == ["humble"] ? .legacyOnly : .modernOnly }
+        let ordered = IRBuilder.distroOrder.filter(read.contains)
+        guard let first = ordered.firstIndex(where: present.contains),
+            let last = ordered.lastIndex(where: present.contains)
+        else {
+            preconditionFailure("FieldAvailability.onlyIn \(present) has none of the read distros \(read)")
+        }
+        let since = first > 0 ? ordered[first] : nil
+        let until = last < ordered.count - 1 ? ordered[last + 1] : nil
+        switch (since, until) {
+        case ("jazzy", nil): return .modernOnly  // ordered[0] is Humble
+        case (nil, "jazzy"): return .legacyOnly  // the field is Humble's alone
+        default: return .bounded(since: since, until: until)
+        }
+    }
+
+    /// The `if` condition of `guard` on the codec named `codec` (`encoder` / `decoder`), or nil
+    /// when the guard admits every distribution.
+    static func guardCondition(_ guard: FieldGuard, codec: String) -> String? {
+        switch `guard` {
+        case .legacyOnly: return "\(codec).isLegacySchema"
+        case .modernOnly: return "!\(codec).isLegacySchema"
+        case .bounded(let since, let until):
+            var parts: [String] = []
+            if let since { parts.append("\(codec).schemaDistro >= .\(since)") }
+            if let until { parts.append("\(codec).schemaDistro < .\(until)") }
+            return parts.isEmpty ? nil : parts.joined(separator: " && ")
+        }
+    }
+
+    /// The doc comment of a field that only some modern distributions have, at `indent`: the
+    /// distributions that have it and what it decodes as elsewhere. Empty for a field every
+    /// distribution has and for a field split between Humble and Jazzy.
+    static func availabilityDoc(
+        _ field: FieldIR, read: Set<String>?, nestedNameOverrides: [String: String], indent: String
+    ) -> String {
+        guard case .onlyIn(let present) = field.availability,
+            case .bounded(let since, let until) = fieldGuard(present: present, read: read)
+        else { return "" }
+        func name(_ distro: String) -> String { distro.prefix(1).uppercased() + distro.dropFirst() }
+        let which: String
+        let elsewhere: String
+        switch (since, until) {
+        case (let since?, nil):
+            which = "\(name(since)) and later only."
+            elsewhere = "Not encoded for an earlier distribution;"
+        case (nil, let until?):
+            which = "Before \(name(until)) only."
+            elsewhere = "Not encoded for \(name(until)) and later;"
+        case (let since?, let until?):
+            which = "\(name(since)) and later, before \(name(until)), only."
+            elsewhere = "Not encoded for other distributions;"
+        case (nil, nil):
+            return ""
+        }
+        let decoded = "decoded there as `\(initDefault(field, nestedNameOverrides: nestedNameOverrides))`."
+        let line = "\(indent)/// \(which) \(elsewhere) \(decoded)"
+        if line.count <= 120 { return line + "\n" }
+        return "\(indent)/// \(which) \(elsewhere)\n\(indent)/// \(decoded)\n"
+    }
+
+    /// Indent each non-empty line of an emitted body by four more spaces.
+    private static func indented(_ body: String) -> String {
+        body
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line -> String in
+                line.isEmpty ? "" : "    " + String(line)
+            }
+            .joined(separator: "\n")
+    }
+
+    /// Encode a field, wrapping the body in a guard (see ``fieldGuard(present:read:)``) when
+    /// availability marks it as distro-conditional:
+    ///   - split between Humble and Jazzy: `if !encoder.isLegacySchema` for a field from Jazzy
+    ///     on, `if encoder.isLegacySchema` for a field Humble alone has, as in 1.0;
+    ///   - any other run of the read distributions `read`: `if encoder.schemaDistro >= .lyrical`,
+    ///     `< .lyrical`, or both bounds.
+    static func emitEncodeWithAvailability(_ field: FieldIR, read: Set<String>? = nil) -> String {
         switch field.availability {
         case .all:
             return emitEncode(field)
         case .onlyIn(let distros):
-            precondition(
-                !distros.isEmpty,
-                "FieldAvailability.onlyIn must contain at least one distro")
-            let known = Set(IRBuilder.distroOrder)
-            precondition(
-                distros.allSatisfy(known.contains),
-                "FieldAvailability.onlyIn contains unknown distro(s): \(distros)")
-            let isLegacyOnly = distros == Set(["humble"])
-            let guardCondition = isLegacyOnly ? "encoder.isLegacySchema" : "!encoder.isLegacySchema"
-            let inner = emitEncode(field)
-            // Indent each non-empty line by an extra 4 spaces.
-            let indented =
-                inner
-                .split(separator: "\n", omittingEmptySubsequences: false)
-                .map { line -> String in
-                    line.isEmpty ? "" : "    " + String(line)
-                }
-                .joined(separator: "\n")
-            var out = "        if \(guardCondition) {\n"
-            out += indented
+            guard let condition = guardCondition(fieldGuard(present: distros, read: read), codec: "encoder") else {
+                return emitEncode(field)
+            }
+            var out = "        if \(condition) {\n"
+            out += indented(emitEncode(field))
             out += "        }\n"
             return out
         }
     }
 
-    /// Decode a field, branching on `decoder.isLegacySchema` when availability
-    /// marks it as distro-conditional. The branch that does not contain the
-    /// distro defaults the field; the other branch decodes from the wire.
+    /// Decode a field, branching like ``emitEncodeWithAvailability(_:read:)`` when availability
+    /// marks it as distro-conditional. The branch for the distributions without the field sets
+    /// it to its init default (the IDL default, else zero); the other branch decodes it.
     static func emitDecodeWithAvailability(
         _ field: FieldIR,
-        nestedNameOverrides: [String: String]
+        nestedNameOverrides: [String: String],
+        read: Set<String>? = nil
     ) -> String {
         switch field.availability {
         case .all:
             return emitDecode(field, nestedNameOverrides: nestedNameOverrides)
         case .onlyIn(let distros):
-            precondition(
-                !distros.isEmpty,
-                "FieldAvailability.onlyIn must contain at least one distro")
-            let known = Set(IRBuilder.distroOrder)
-            precondition(
-                distros.allSatisfy(known.contains),
-                "FieldAvailability.onlyIn contains unknown distro(s): \(distros)")
-            let isLegacyOnly = distros == Set(["humble"])
-            let defaultExpr = swiftDefault(
-                field.type, nestedNameOverrides: nestedNameOverrides)
-            let body = emitDecode(field, nestedNameOverrides: nestedNameOverrides)
-            // The decode body assigns `self.<name> = ...` already. Indent it
-            // under whichever branch contains the field.
-            let indentedBody =
-                body
-                .split(separator: "\n", omittingEmptySubsequences: false)
-                .map { line -> String in
-                    line.isEmpty ? "" : "    " + String(line)
-                }
-                .joined(separator: "\n")
-            var out = ""
-            if isLegacyOnly {
-                out += "        if decoder.isLegacySchema {\n"
-                out += indentedBody
-                out += "        } else {\n"
-                out += "            self.\(field.swiftName) = \(defaultExpr)\n"
-                out += "        }\n"
-            } else {
-                out += "        if decoder.isLegacySchema {\n"
-                out += "            self.\(field.swiftName) = \(defaultExpr)\n"
-                out += "        } else {\n"
-                out += indentedBody
-                out += "        }\n"
+            let fieldGuard = fieldGuard(present: distros, read: read)
+            guard let condition = guardCondition(fieldGuard, codec: "decoder") else {
+                return emitDecode(field, nestedNameOverrides: nestedNameOverrides)
             }
+            let defaultExpr = initDefault(field, nestedNameOverrides: nestedNameOverrides)
+            let body = indented(emitDecode(field, nestedNameOverrides: nestedNameOverrides))
+            let absent = "            self.\(field.swiftName) = \(defaultExpr)\n"
+            var out = ""
+            if fieldGuard == .modernOnly {
+                // 1.0 shape: the legacy branch first.
+                out += "        if decoder.isLegacySchema {\n"
+                out += absent
+                out += "        } else {\n"
+                out += body
+            } else {
+                out += "        if \(condition) {\n"
+                out += body
+                out += "        } else {\n"
+                out += absent
+            }
+            out += "        }\n"
             return out
         }
     }

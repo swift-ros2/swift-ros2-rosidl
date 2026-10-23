@@ -126,3 +126,21 @@ public enum ServiceDescription {
         registry[actionLevel.rosTypeName] = actionLevel
     }
 }
+
+/// The RIHS01 hashes of a service for one distribution: its request and response halves and
+/// the service-level type (see ``ServiceDescription``). `nil` where a hash is unknown.
+public struct ServiceHashes: Equatable, Sendable {
+    /// Hash of `<pkg>/srv/<Service>_Request`.
+    public var requestHash: String?
+    /// Hash of `<pkg>/srv/<Service>_Response`.
+    public var responseHash: String?
+    /// Hash of the service-level `<pkg>/srv/<Service>` type.
+    public var serviceHash: String?
+
+    /// Creates the hashes of one distribution.
+    public init(requestHash: String?, responseHash: String?, serviceHash: String?) {
+        self.requestHash = requestHash
+        self.responseHash = responseHash
+        self.serviceHash = serviceHash
+    }
+}

@@ -107,10 +107,9 @@ still go to `<PascalCasePackage>/`, so name your Swift target to match the modul
 
 ### Distributions
 
-The `@<distribution>` label says which distribution the IDL comes from. Generated types carry
-one RIHS01 hash for every distribution from Jazzy on. Humble has no type hashes; swift-ros2
-drops the hash there. Generated types also carry one field layout for Jazzy and later, plus a
-Humble layout when you pass Humble IDL and its fields differ.
+The `@<distribution>` label says which distribution the IDL comes from. Humble has no type
+hashes; swift-ros2 drops the hash there. Every later distribution has RIHS01 hashes, and a
+generated type knows the field layout and the hash of each distribution you pass.
 
 - **One snapshot for all distributions.** When you pass one snapshot, for example everything
   `@jazzy`, the hash is the hash of that snapshot's IDL, your package and every dependency.
@@ -118,11 +117,41 @@ Humble layout when you pass Humble IDL and its fields differ.
   package changed in a later distribution, hosts on that distribution compute a different hash,
   and rmw_zenoh_cpp does not match the topic. Generate from the IDL of the distributions you
   deploy against, and check with `--verify-hashes` on each one.
-- **Humble differences.** If a message of yours has fields that differ between Humble and later
-  distributions, pass the package once per distribution (`…@humble` and `…@jazzy`). The
-  generator merges them into one type that picks its layout at run time. Differences among
-  Jazzy and later distributions are rejected, because generated types support only one modern
-  layout.
+- **Fields that differ between distributions.** Pass the package once per distribution
+  (`…@humble`, `…@jazzy`, `…@kilted`, `…@lyrical`). The generator merges them into one type that
+  picks its layout at run time. A field that only some distributions have is a plain property
+  with its IDL default (else zero); it is written only for the distributions that have it,
+  and decoded as that default elsewhere, so a value set for another distribution is dropped.
+  Its doc comment says where it exists, and the generated code compares the codec's
+  distribution the same way you can:
+
+  ```swift
+  /// Lyrical and later only. Not encoded for an earlier distribution; decoded there as `0.0`.
+  public var smoothnessLevel: Double
+  // …
+  if encoder.schemaDistro >= .lyrical {
+      encoder.writeFloat64(smoothnessLevel)
+  }
+  ```
+
+  A type whose hash differs among distributions, including one that only holds such a type
+  (at any depth, in any package) and the services and actions that use it, gets
+  `typeInfo(for:)` with one hash per change; `typeInfo` is the Jazzy one. A field split
+  between Humble and Jazzy keeps the `isLegacySchema` form of 1.0.
+- **What a distribution you did not pass gets.** A distribution takes the layout and the hash
+  of the newest distribution you passed that is not newer than it, else of the oldest you
+  passed: Rolling without Rolling IDL gets Lyrical's, and an unread Kilted between Jazzy and
+  Lyrical gets Jazzy's. Pass every distribution you deploy against.
+- **What is rejected.** A field must exist in one contiguous run of the distributions passed
+  (not in Jazzy and Lyrical but missing from Kilted); fields both distributions have must be in
+  the same order; a field's type (bound included) must not change; and a `.srv` or `.action`
+  file must be the same in every distribution (one that only references a changed message is
+  fine). Renaming a field reads as removing one and adding another.
+
+A program sends the layout and the hash of the distribution it runs against only with a
+swift-ros2 that asks generated types for `typeInfo(for:)` and creates codecs with
+`CDREncoder(distro:)` / `CDRDecoder(data:distro:)` (swift-ros2 3.1.0 or later). An older
+release sends the Jazzy layout and hash on every distribution after Humble.
 
 ROS names that equal a Swift standard-library type get a `Msg` suffix (`StringMsg`,
 `DurationMsg`, `RangeMsg`).
