@@ -80,17 +80,76 @@ struct IRBuilderMergeTests {
         }
     }
 
-    @Test("reordered fields with no schema change merges without error")
-    func reorderedFieldsMergeWithoutError() throws {
+    @Test("fields reordered between distros are rejected")
+    func reorderedFieldsAreRejected() {
         let humble = makeIDL(
             package: "demo_msgs", typeName: "Foo",
             primitives: [("a", .int32), ("b", .int32)])
         let jazzy = makeIDL(
             package: "demo_msgs", typeName: "Foo",
             primitives: [("b", .int32), ("a", .int32)])
-        let ir = try IRBuilder.build(perDistro: ["humble": humble, "jazzy": jazzy])
-        // Canonical order is "first distro wins for ordering". Humble walked first.
-        #expect(ir.fields.map(\.ros2Name) == ["a", "b"])
-        #expect(ir.fields.allSatisfy { $0.availability == .all })
+        #expect(
+            throws: IRBuildError("demo_msgs/msg/Foo: fields 'a', 'b' are in a different order in jazzy than in humble")
+        ) {
+            try IRBuilder.build(perDistro: ["humble": humble, "jazzy": jazzy])
+        }
+    }
+
+    @Test("a field inserted in the middle in a later distro keeps every distro's order")
+    func fieldInsertedInTheMiddle() throws {
+        let jazzy = makeIDL(
+            package: "demo_msgs", typeName: "Foo",
+            primitives: [("a", .int32), ("b", .int32), ("c", .int32)])
+        let lyrical = makeIDL(
+            package: "demo_msgs", typeName: "Foo",
+            primitives: [("a", .int32), ("x", .float64), ("b", .int32), ("c", .int32)])
+        let ir = try IRBuilder.build(perDistro: ["jazzy": jazzy, "lyrical": lyrical])
+        #expect(ir.fields.map(\.ros2Name) == ["a", "x", "b", "c"])
+        #expect(ir.fields[1].availability == .onlyIn(["lyrical"]))
+        #expect(ir.fields.filter { $0.ros2Name != "x" }.allSatisfy { $0.availability == .all })
+    }
+
+    @Test("a field one distro drops and another adds at the same place follows the older order")
+    func droppedAndAddedFieldsFollowTheOlderOrder() throws {
+        let jazzy = makeIDL(
+            package: "demo_msgs", typeName: "Foo",
+            primitives: [("a", .int32), ("old", .int32), ("c", .int32)])
+        let kilted = makeIDL(
+            package: "demo_msgs", typeName: "Foo",
+            primitives: [("a", .int32), ("new", .int32), ("c", .int32)])
+        let ir = try IRBuilder.build(perDistro: ["jazzy": jazzy, "kilted": kilted])
+        #expect(ir.fields.map(\.ros2Name) == ["a", "old", "new", "c"])
+    }
+
+    @Test("an order only a later distro fixes is taken from that distro")
+    func laterDistroFixesTheOrder() throws {
+        // Jazzy and Kilted leave the order of 'b' and 'x' open; Lyrical has both.
+        let jazzy = makeIDL(
+            package: "demo_msgs", typeName: "Foo",
+            primitives: [("a", .int32), ("b", .int32), ("c", .int32)])
+        let kilted = makeIDL(
+            package: "demo_msgs", typeName: "Foo",
+            primitives: [("a", .int32), ("x", .int32), ("c", .int32)])
+        let lyrical = makeIDL(
+            package: "demo_msgs", typeName: "Foo",
+            primitives: [("a", .int32), ("b", .int32), ("x", .int32), ("c", .int32)])
+        let ir = try IRBuilder.build(perDistro: ["jazzy": jazzy, "kilted": kilted, "lyrical": lyrical])
+        #expect(ir.fields.map(\.ros2Name) == ["a", "b", "x", "c"])
+    }
+
+    @Test("fields no single order fits are rejected even when no two distros disagree directly")
+    func cyclicOrderIsRejected() {
+        let jazzy = makeIDL(
+            package: "demo_msgs", typeName: "Foo", primitives: [("a", .int32), ("b", .int32)])
+        let kilted = makeIDL(
+            package: "demo_msgs", typeName: "Foo", primitives: [("b", .int32), ("c", .int32)])
+        let lyrical = makeIDL(
+            package: "demo_msgs", typeName: "Foo", primitives: [("c", .int32), ("a", .int32)])
+        #expect(
+            throws: IRBuildError(
+                "demo_msgs/msg/Foo: fields 'a', 'b', 'c' cannot be put in one order that matches every distribution")
+        ) {
+            try IRBuilder.build(perDistro: ["jazzy": jazzy, "kilted": kilted, "lyrical": lyrical])
+        }
     }
 }
