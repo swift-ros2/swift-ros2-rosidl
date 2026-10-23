@@ -126,6 +126,67 @@ struct PipelineDistroPresenceTests {
         #expect(plan.first { $0.typeName == "S_Response" }?.topLevelTypeName == "S")
     }
 
+    @Test("the verify plan checks Rolling with the newest read distribution's projection")
+    func verifyPlanRollingStandIn() throws {
+        let package = try SplitPackage()
+        defer { package.remove() }
+        let rolling = try Pipeline.buildVerifyPlan(package.runs, distros: ["rolling"])
+        let lyrical = try Pipeline.buildVerifyPlan(package.runs, distros: ["lyrical"])
+        // The Lyrical types, labelled Rolling so the JSON is read from /opt/ros/rolling.
+        #expect(rolling.allSatisfy { $0.distro == "rolling" })
+        #expect(Set(rolling.map(\.rosTypeName)) == Set(lyrical.map(\.rosTypeName)))
+        #expect(rolling.contains { $0.rosTypeName == "foo_msgs/msg/A" })
+        #expect(!rolling.contains { $0.rosTypeName == "foo_msgs/msg/B" })
+        #expect(rolling.contains { $0.rosTypeName == "foo_msgs/action/L_SendGoal" })
+
+        // A merged type is checked with the shape generated code gives Rolling (Lyrical's),
+        // and an unread Kilted between Jazzy and Lyrical with Jazzy's.
+        let varying = try MultiDistroFixture(ModernHashPropagationTests.planPackage(["jazzy", "lyrical"]))
+        defer { varying.remove() }
+        func hashes(_ distro: String) throws -> [String: String] {
+            Dictionary(
+                uniqueKeysWithValues: try Pipeline.buildVerifyPlan(varying.runs, distros: [distro]).map {
+                    #expect($0.distro == distro)
+                    return ($0.rosTypeName, $0.expectedHash)
+                })
+        }
+        let jazzyHashes = try hashes("jazzy")
+        let lyricalHashes = try hashes("lyrical")
+        #expect(try hashes("rolling") == lyricalHashes)
+        #expect(try hashes("kilted") == jazzyHashes)
+        #expect(jazzyHashes["fixture_msgs/msg/Plan"] != lyricalHashes["fixture_msgs/msg/Plan"])
+        #expect(jazzyHashes["fixture_msgs/action/Move_SendGoal"] != lyricalHashes["fixture_msgs/action/Move_SendGoal"])
+    }
+
+    @Test("the verify plan checks every hash the generated typeInfo(for:) returns")
+    func verifyPlanCoversEmittedHashes() throws {
+        // fixture_msgs is read for Jazzy and Lyrical only and holds dep_msgs/Plan, which Kilted
+        // changes: its Kilted hashes exist only through the projection and must be checked too.
+        let fixture = try MultiDistroFixture(packages: ModernHashPropagationTests.splitReadPackages())
+        defer { fixture.remove() }
+        let modern = Set(IRBuilder.modernDistros)
+        let plan = try Pipeline.buildVerifyPlan(fixture.runs, distros: modern)
+        var planned: [String: [String: String]] = [:]
+        for entry in plan { planned[entry.rosTypeName, default: [:]][entry.distro] = entry.expectedHash }
+        let holder = try #require(planned["fixture_msgs/msg/Holder"])
+        #expect(Set(holder.keys) == modern)
+        #expect(holder["kilted"] != holder["jazzy"])
+        #expect(holder["kilted"] == holder["lyrical"])
+        #expect(planned["fixture_msgs/srv/Use"]?.keys.sorted() == modern.sorted())
+        #expect(planned["fixture_msgs/action/Run_SendGoal_Request"]?.keys.sorted() == modern.sorted())
+
+        // Every hash in every generated file is one the plan checks, on the distributions
+        // whose `typeInfo(for:)` returns it.
+        let checked = Set(plan.map(\.expectedHash))
+        for (path, source) in try fixture.generate() where path.hasPrefix("FixtureMsgs/") {
+            for hash in MultiDistroFixture.hashes(in: source) {
+                #expect(checked.contains(hash), "\(path): \(hash) is not verified")
+            }
+        }
+        // Without --distros, every distribution of the run is checked.
+        #expect(Set(try Pipeline.buildVerifyPlan(fixture.runs).map(\.distro)) == ["jazzy", "kilted", "lyrical"])
+    }
+
     @Test("an action that differs between distributions is rejected")
     func divergentActionIsRejected() throws {
         let package = try SplitPackage()

@@ -71,7 +71,9 @@ struct SwiftROS2GenCommand: ParsableCommand {
         help: """
             Comma-separated distro allow-list for --verify-hashes (default: all distros derived from --input \
             except 'humble', which has no rosidl type-hash JSON). Each distro must match the tag the Docker image \
-            is pulled from (e.g. 'jazzy,kilted,lyrical,rolling').
+            is pulled from (e.g. 'jazzy,kilted,lyrical,rolling'). Every --input distro is still read, and every \
+            type is checked with the hash its generated typeInfo(for:) returns; on a distro its package was not \
+            read for (e.g. 'rolling') with the shape of the newest distro read for the package not newer than it.
             """
     )
     var distros: String?
@@ -190,11 +192,9 @@ struct SwiftROS2GenCommand: ParsableCommand {
         var runs: [Pipeline.PackageRun] = []
         for raw in input {
             let pkg = try parseInput(raw)
-            // Skip inputs whose distro is excluded by the allow-list. We
-            // still parse every other distro since cross-package nested
-            // references (e.g. sensor_msgs/Imu -> std_msgs/Header) must
-            // resolve in `Pipeline.buildVerifyPlan`'s registry.
-            if let allowed = allowedDistros, !allowed.contains(pkg.distro) { continue }
+            // Every distro is read, also the ones --distros leaves out: the generated types merge
+            // them, and their hashes for a distro are those of the merged type projected onto it.
+            // `Pipeline.buildVerifyPlan` keeps only the distros the allow-list selects.
             runs.append(
                 .init(
                     input: PackageInput(

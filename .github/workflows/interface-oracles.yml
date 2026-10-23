@@ -101,15 +101,18 @@ jobs:
           fi
       - name: Hash oracle
         run: |
-          # One distribution, labelled with the row's name: the Rolling row verifies the
-          # Lyrical IDL as @rolling, so --distros rolling selects it.
+          # Every generated distribution, as Scripts/regenerate.sh reads them, so the hashes
+          # checked are those the merged generated types carry. --distros picks the row; the
+          # Rolling row, with no Rolling IDL, checks the hashes generated types use on Rolling
+          # (the newest generated distribution's shape) against /opt/ros/rolling.
           ARGS=()
-          while IFS= read -r line; do ARGS+=("$line"); done < <(bash Scripts/generator-args.sh "${{ matrix.ros_distro }}")
+          while IFS= read -r line; do ARGS+=("$line"); done < <(bash Scripts/generator-args.sh)
           swift run swift-ros2-gen "${ARGS[@]}" --verify-hashes "$IMAGE" --distros "${{ matrix.ros_distro }}" --diagnose
       - name: CDR oracle
         run: |
-          # Only the samples of the types this distribution has: the oracle image fails on a
-          # type its distribution lacks.
+          # Only the samples of the types this distribution has, encoded with its message
+          # schemas: the oracle image fails on a type its distribution lacks, and on a field
+          # its distribution lacks or misses.
           swift run "${{ inputs.corpus-product }}" "$PWD/oracle-corpus" "${{ matrix.ros_distro }}"
           docker run --rm -v "$PWD/oracle-corpus:/corpus:ro" \
             -v "$PWD/${{ inputs.rosidl-path }}/Scripts/cdr-oracle.py:/cdr-oracle.py:ro" \

@@ -593,8 +593,11 @@ extension Pipeline {
             let ordered = known + distros.subtracting(known).sorted()
             return "[" + ordered.map { "\"\($0)\"" }.joined(separator: ", ") + "]"
         }
-        // Generated types give Rolling the modern hash of the newest named distribution.
-        let rollingStandIn = IRBuilder.distroOrder.last { $0 != "rolling" } ?? "rolling"
+        // Without Rolling IDL, generated types give Rolling the shape and hash of the newest
+        // distribution read (the schema distribution rule).
+        let emittedDistros = Set(runs.filter(\.emit).map(\.input.distro))
+        let rollingStandIn = IRBuilder.schemaDistro(
+            for: "rolling", read: emittedDistros.intersection(IRBuilder.distroOrder.filter { $0 != "rolling" }))
         var registry = header(packages: allPackages)
         registry += """
 
@@ -608,44 +611,65 @@ extension Pipeline {
                 let reencode: (Data) throws -> Data
             }
 
+            /// One generated type: an ``OracleSample`` whose codecs take the message schemas of a
+            /// distribution (nil: the default, Jazzy).
+            struct OracleType {
+                let rosName: String
+                let distributions: Set<String>
+                let encode: (ROS2Distro?) throws -> Data
+                let reencode: (Data, ROS2Distro?) throws -> Data
+
+                func sample(schema: ROS2Distro?) -> OracleSample {
+                    OracleSample(
+                        rosName: rosName, distributions: distributions, encode: { try encode(schema) },
+                        reencode: { try reencode($0, schema) })
+                }
+            }
+
             /// The samples of this run.
             enum OracleSamples {
                 /// Every distribution this run read IDL for.
-                static let distributions: Set<String> = \(literal(Set(runs.filter(\.emit).map(\.input.distro))))
+                static let distributions: Set<String> = \(literal(emittedDistros))
 
-                /// The samples of the types `distro` has, or nil when this run read no IDL for
-                /// `distro`. Without Rolling IDL, Rolling has the \(rollingStandIn.capitalized) samples: generated types
-                /// give Rolling the modern (\(rollingStandIn.capitalized)) hash.
+                /// The samples of the types `distro` has, encoded and decoded with the message
+                /// schemas of `distro`, or nil when this run read no IDL for `distro`. Without
+                /// Rolling IDL, Rolling has the \(rollingStandIn.capitalized) samples: generated types give
+                /// Rolling the \(rollingStandIn.capitalized) shape and hash.
                 static func samples(for distro: String) -> [OracleSample]? {
                     let source = distro == "rolling" && !distributions.contains("rolling") ? "\(rollingStandIn)" : distro
                     guard distributions.contains(source) else { return nil }
-                    return all.filter { $0.distributions.contains(source) }
+                    let schema = ROS2Distro(rawValue: distro)
+                    return types.filter { $0.distributions.contains(source) }.map { $0.sample(schema: schema) }
                 }
 
-                /// Every sample, in ROS-name order.
-                static let all: [OracleSample] = [
+                /// Every sample, in ROS-name order, with the default (Jazzy) schemas.
+                static let all: [OracleSample] = types.map { $0.sample(schema: nil) }
+
+                /// Every type, in ROS-name order.
+                static let types: [OracleType] = [
 
             """
         for sample in samples.sorted(by: { $0.rosName < $1.rosName }) {
-            registry += "        OracleSample(\n"
+            registry += "        OracleType(\n"
             registry += "            rosName: \"\(sample.rosName)\",\n"
             registry += "            distributions: \(literal(sample.distros)),\n"
-            registry += "            encode: { try oracleEncode(\(sample.swiftName).oracleSample()) },\n"
-            registry += "            reencode: { try oracleReencode(\(sample.swiftName).self, $0) }),\n"
+            registry += "            encode: { try oracleEncode(\(sample.swiftName).oracleSample(), $0) },\n"
+            registry += "            reencode: { try oracleReencode(\(sample.swiftName).self, $0, $1) }),\n"
         }
         registry += """
                 ]
             }
 
-            func oracleEncode<T: CDREncodable>(_ value: T) throws -> Data {
-                let encoder = CDREncoder()
+            func oracleEncode<T: CDREncodable>(_ value: T, _ schema: ROS2Distro?) throws -> Data {
+                let encoder = schema.map { CDREncoder(distro: $0) } ?? CDREncoder()
                 encoder.writeEncapsulationHeader()
                 try value.encode(to: encoder)
                 return encoder.getData()
             }
 
-            func oracleReencode<T: CDRCodable>(_ type: T.Type, _ data: Data) throws -> Data {
-                try oracleEncode(T(from: CDRDecoder(data: data)))
+            func oracleReencode<T: CDRCodable>(_ type: T.Type, _ data: Data, _ schema: ROS2Distro?) throws -> Data {
+                let decoder = try schema.map { try CDRDecoder(data: data, distro: $0) } ?? CDRDecoder(data: data)
+                return try oracleEncode(T(from: decoder), schema)
             }
 
             """
@@ -732,6 +756,16 @@ extension Pipeline {
     /// `Fibonacci_SendGoal_Request` the top-level type is `Fibonacci`). The
     /// verifier groups entries by `(package, kind, topLevelTypeName, distro)`
     /// so it issues exactly one oracle JSON read per source IDL file.
+    ///
+    /// Pass every distribution the generated code was made from, so the plan checks the merged
+    /// projection the generated types carry, and select the distributions to check with
+    /// `distros` (default: every distribution of the emitted runs except Humble). Each type is
+    /// checked on every selected distribution with the hash its generated `typeInfo(for:)`
+    /// returns there (the same projection). A distribution the type's package was read for but
+    /// whose IDL lacks the type is skipped; a distribution the package was not read for
+    /// (Rolling without Rolling IDL, or a distribution only other packages were read for) is
+    /// checked when the type's schema distribution there (``IRBuilder/schemaDistro(for:read:)``
+    /// over the package's distributions) has it, labelled with the selected distribution.
     public static func buildVerifyPlan(
         _ runs: [PackageRun],
         distros allowedDistros: Set<String>? = nil
@@ -739,21 +773,31 @@ extension Pipeline {
         // Reuse the multi-package gather + register sequence of generateMulti so
         // cross-package nested references resolve.
         let c = try collect(runs)
+        // A selected distribution the type's package was not read for is checked as the
+        // generated code treats it: the type of its schema distribution, with the hash projected
+        // onto the selected distribution (each contained type with its own read set, exactly as
+        // `generateMulti` computes the `typeInfo(for:)` ladder), labelled with the selected
+        // distribution so the oracle JSON comes from that distribution's install.
+        var packageDistros: [String: Set<String>] = [:]
+        for run in runs { packageDistros[run.input.name, default: []].insert(run.input.distro) }
+        let selected = (allowedDistros ?? Set(runs.filter(\.emit).map(\.input.distro))).filter { $0 != "humble" }
+        func verifiedDistros(_ typeDistros: Set<String>, package: String) -> [String] {
+            let read = packageDistros[package] ?? typeDistros
+            return selected.filter { distro in
+                if typeDistros.contains(distro) { return true }
+                // The package was read for `distro` and its IDL there has no such type.
+                if read.contains(distro) { return false }
+                return typeDistros.contains(IRBuilder.schemaDistro(for: distro, read: read))
+            }.sorted()
+        }
 
-        // For each distro the caller asked about (default: every distro whose IDL
-        // has the type), compute the per-distro hash and emit one VerifyPlanEntry
-        // per (ir, distro) pair. A type is in scope only for the distributions
-        // whose IDL has it (``CollectedIR/distros``): a single run's own
-        // distribution, or for a package read from several distributions the ones
-        // that have the message, service or action.
+        // For each selected distro compute the per-distro hash and emit one VerifyPlanEntry per
+        // (ir, distro) pair, following ``CollectedIR/distros`` as above.
         var out: [VerifyPlanEntry] = []
         for entry in c.unresolvedIRs {
-            for distro in entry.distros.sorted() {
-                if let allow = allowedDistros, !allow.contains(distro) { continue }
-                // Humble does not have a hash oracle; rosidl pre-RIHS01.
-                // Skip silently to keep the verify-mode focused on the
-                // distros the rosidl `.json` files actually exist for.
-                if distro == "humble" { continue }
+            // Humble does not have a hash oracle; rosidl pre-RIHS01. It is skipped silently to
+            // keep the verify-mode focused on the distros the rosidl `.json` files exist for.
+            for distro in verifiedDistros(entry.distros, package: entry.ir.package) {
                 let hash = RIHS01.hash(entry.ir, for: distro, registry: c.registry)
                 out.append(
                     VerifyPlanEntry(
@@ -794,8 +838,7 @@ extension Pipeline {
             }
         }
         for (ir, topLevel, irDistros) in synthesized {
-            for distro in irDistros.sorted() where distro != "humble" {
-                if let allow = allowedDistros, !allow.contains(distro) { continue }
+            for distro in verifiedDistros(irDistros, package: ir.package) {
                 out.append(
                     VerifyPlanEntry(
                         package: ir.package, kind: ir.kind, typeName: ir.typeName, topLevelTypeName: topLevel,

@@ -18,217 +18,238 @@ struct OracleSample {
     let reencode: (Data) throws -> Data
 }
 
+/// One generated type: an ``OracleSample`` whose codecs take the message schemas of a
+/// distribution (nil: the default, Jazzy).
+struct OracleType {
+    let rosName: String
+    let distributions: Set<String>
+    let encode: (ROS2Distro?) throws -> Data
+    let reencode: (Data, ROS2Distro?) throws -> Data
+
+    func sample(schema: ROS2Distro?) -> OracleSample {
+        OracleSample(
+            rosName: rosName, distributions: distributions, encode: { try encode(schema) },
+            reencode: { try reencode($0, schema) })
+    }
+}
+
 /// The samples of this run.
 enum OracleSamples {
     /// Every distribution this run read IDL for.
     static let distributions: Set<String> = ["humble", "jazzy", "kilted", "lyrical"]
 
-    /// The samples of the types `distro` has, or nil when this run read no IDL for
-    /// `distro`. Without Rolling IDL, Rolling has the Lyrical samples: generated types
-    /// give Rolling the modern (Lyrical) hash.
+    /// The samples of the types `distro` has, encoded and decoded with the message
+    /// schemas of `distro`, or nil when this run read no IDL for `distro`. Without
+    /// Rolling IDL, Rolling has the Lyrical samples: generated types give
+    /// Rolling the Lyrical shape and hash.
     static func samples(for distro: String) -> [OracleSample]? {
         let source = distro == "rolling" && !distributions.contains("rolling") ? "lyrical" : distro
         guard distributions.contains(source) else { return nil }
-        return all.filter { $0.distributions.contains(source) }
+        let schema = ROS2Distro(rawValue: distro)
+        return types.filter { $0.distributions.contains(source) }.map { $0.sample(schema: schema) }
     }
 
-    /// Every sample, in ROS-name order.
-    static let all: [OracleSample] = [
-        OracleSample(
+    /// Every sample, in ROS-name order, with the default (Jazzy) schemas.
+    static let all: [OracleSample] = types.map { $0.sample(schema: nil) }
+
+    /// Every type, in ROS-name order.
+    static let types: [OracleType] = [
+        OracleType(
             rosName: "action_msgs/msg/GoalInfo",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GoalInfo.oracleSample()) },
-            reencode: { try oracleReencode(GoalInfo.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GoalInfo.oracleSample(), $0) },
+            reencode: { try oracleReencode(GoalInfo.self, $0, $1) }),
+        OracleType(
             rosName: "action_msgs/msg/GoalStatus",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GoalStatus.oracleSample()) },
-            reencode: { try oracleReencode(GoalStatus.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GoalStatus.oracleSample(), $0) },
+            reencode: { try oracleReencode(GoalStatus.self, $0, $1) }),
+        OracleType(
             rosName: "action_msgs/msg/GoalStatusArray",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GoalStatusArray.oracleSample()) },
-            reencode: { try oracleReencode(GoalStatusArray.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GoalStatusArray.oracleSample(), $0) },
+            reencode: { try oracleReencode(GoalStatusArray.self, $0, $1) }),
+        OracleType(
             rosName: "action_msgs/srv/CancelGoal_Request",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(CancelGoalRequest.oracleSample()) },
-            reencode: { try oracleReencode(CancelGoalRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(CancelGoalRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(CancelGoalRequest.self, $0, $1) }),
+        OracleType(
             rosName: "action_msgs/srv/CancelGoal_Response",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(CancelGoalResponse.oracleSample()) },
-            reencode: { try oracleReencode(CancelGoalResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(CancelGoalResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(CancelGoalResponse.self, $0, $1) }),
+        OracleType(
             rosName: "builtin_interfaces/msg/Duration",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(DurationMsg.oracleSample()) },
-            reencode: { try oracleReencode(DurationMsg.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(DurationMsg.oracleSample(), $0) },
+            reencode: { try oracleReencode(DurationMsg.self, $0, $1) }),
+        OracleType(
             rosName: "builtin_interfaces/msg/Time",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(Time.oracleSample()) },
-            reencode: { try oracleReencode(Time.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(Time.oracleSample(), $0) },
+            reencode: { try oracleReencode(Time.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/FloatingPointRange",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(FloatingPointRange.oracleSample()) },
-            reencode: { try oracleReencode(FloatingPointRange.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(FloatingPointRange.oracleSample(), $0) },
+            reencode: { try oracleReencode(FloatingPointRange.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/IntegerRange",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(IntegerRange.oracleSample()) },
-            reencode: { try oracleReencode(IntegerRange.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(IntegerRange.oracleSample(), $0) },
+            reencode: { try oracleReencode(IntegerRange.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/ListParametersResult",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ListParametersResult.oracleSample()) },
-            reencode: { try oracleReencode(ListParametersResult.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ListParametersResult.oracleSample(), $0) },
+            reencode: { try oracleReencode(ListParametersResult.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/Log",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(Log.oracleSample()) },
-            reencode: { try oracleReencode(Log.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(Log.oracleSample(), $0) },
+            reencode: { try oracleReencode(Log.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/LoggerLevel",
             distributions: ["jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(LoggerLevel.oracleSample()) },
-            reencode: { try oracleReencode(LoggerLevel.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(LoggerLevel.oracleSample(), $0) },
+            reencode: { try oracleReencode(LoggerLevel.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/Parameter",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(Parameter.oracleSample()) },
-            reencode: { try oracleReencode(Parameter.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(Parameter.oracleSample(), $0) },
+            reencode: { try oracleReencode(Parameter.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/ParameterDescriptor",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ParameterDescriptor.oracleSample()) },
-            reencode: { try oracleReencode(ParameterDescriptor.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ParameterDescriptor.oracleSample(), $0) },
+            reencode: { try oracleReencode(ParameterDescriptor.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/ParameterEvent",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ParameterEvent.oracleSample()) },
-            reencode: { try oracleReencode(ParameterEvent.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ParameterEvent.oracleSample(), $0) },
+            reencode: { try oracleReencode(ParameterEvent.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/ParameterEventDescriptors",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ParameterEventDescriptors.oracleSample()) },
-            reencode: { try oracleReencode(ParameterEventDescriptors.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ParameterEventDescriptors.oracleSample(), $0) },
+            reencode: { try oracleReencode(ParameterEventDescriptors.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/ParameterType",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ParameterType.oracleSample()) },
-            reencode: { try oracleReencode(ParameterType.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ParameterType.oracleSample(), $0) },
+            reencode: { try oracleReencode(ParameterType.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/ParameterValue",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ParameterValue.oracleSample()) },
-            reencode: { try oracleReencode(ParameterValue.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ParameterValue.oracleSample(), $0) },
+            reencode: { try oracleReencode(ParameterValue.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/SetLoggerLevelsResult",
             distributions: ["jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetLoggerLevelsResult.oracleSample()) },
-            reencode: { try oracleReencode(SetLoggerLevelsResult.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetLoggerLevelsResult.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetLoggerLevelsResult.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/msg/SetParametersResult",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetParametersResult.oracleSample()) },
-            reencode: { try oracleReencode(SetParametersResult.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetParametersResult.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetParametersResult.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/DescribeParameters_Request",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(DescribeParametersRequest.oracleSample()) },
-            reencode: { try oracleReencode(DescribeParametersRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(DescribeParametersRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(DescribeParametersRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/DescribeParameters_Response",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(DescribeParametersResponse.oracleSample()) },
-            reencode: { try oracleReencode(DescribeParametersResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(DescribeParametersResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(DescribeParametersResponse.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/GetLoggerLevels_Request",
             distributions: ["jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GetLoggerLevelsRequest.oracleSample()) },
-            reencode: { try oracleReencode(GetLoggerLevelsRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GetLoggerLevelsRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(GetLoggerLevelsRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/GetLoggerLevels_Response",
             distributions: ["jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GetLoggerLevelsResponse.oracleSample()) },
-            reencode: { try oracleReencode(GetLoggerLevelsResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GetLoggerLevelsResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(GetLoggerLevelsResponse.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/GetParameterTypes_Request",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GetParameterTypesRequest.oracleSample()) },
-            reencode: { try oracleReencode(GetParameterTypesRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GetParameterTypesRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(GetParameterTypesRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/GetParameterTypes_Response",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GetParameterTypesResponse.oracleSample()) },
-            reencode: { try oracleReencode(GetParameterTypesResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GetParameterTypesResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(GetParameterTypesResponse.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/GetParameters_Request",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GetParametersRequest.oracleSample()) },
-            reencode: { try oracleReencode(GetParametersRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GetParametersRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(GetParametersRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/GetParameters_Response",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(GetParametersResponse.oracleSample()) },
-            reencode: { try oracleReencode(GetParametersResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(GetParametersResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(GetParametersResponse.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/ListParameters_Request",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ListParametersRequest.oracleSample()) },
-            reencode: { try oracleReencode(ListParametersRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ListParametersRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(ListParametersRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/ListParameters_Response",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(ListParametersResponse.oracleSample()) },
-            reencode: { try oracleReencode(ListParametersResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(ListParametersResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(ListParametersResponse.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/SetLoggerLevels_Request",
             distributions: ["jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetLoggerLevelsRequest.oracleSample()) },
-            reencode: { try oracleReencode(SetLoggerLevelsRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetLoggerLevelsRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetLoggerLevelsRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/SetLoggerLevels_Response",
             distributions: ["jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetLoggerLevelsResponse.oracleSample()) },
-            reencode: { try oracleReencode(SetLoggerLevelsResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetLoggerLevelsResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetLoggerLevelsResponse.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/SetParametersAtomically_Request",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetParametersAtomicallyRequest.oracleSample()) },
-            reencode: { try oracleReencode(SetParametersAtomicallyRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetParametersAtomicallyRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetParametersAtomicallyRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/SetParametersAtomically_Response",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetParametersAtomicallyResponse.oracleSample()) },
-            reencode: { try oracleReencode(SetParametersAtomicallyResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetParametersAtomicallyResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetParametersAtomicallyResponse.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/SetParameters_Request",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetParametersRequest.oracleSample()) },
-            reencode: { try oracleReencode(SetParametersRequest.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetParametersRequest.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetParametersRequest.self, $0, $1) }),
+        OracleType(
             rosName: "rcl_interfaces/srv/SetParameters_Response",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(SetParametersResponse.oracleSample()) },
-            reencode: { try oracleReencode(SetParametersResponse.self, $0) }),
-        OracleSample(
+            encode: { try oracleEncode(SetParametersResponse.oracleSample(), $0) },
+            reencode: { try oracleReencode(SetParametersResponse.self, $0, $1) }),
+        OracleType(
             rosName: "unique_identifier_msgs/msg/UUID",
             distributions: ["humble", "jazzy", "kilted", "lyrical"],
-            encode: { try oracleEncode(UniqueIdentifierUUID.oracleSample()) },
-            reencode: { try oracleReencode(UniqueIdentifierUUID.self, $0) }),
+            encode: { try oracleEncode(UniqueIdentifierUUID.oracleSample(), $0) },
+            reencode: { try oracleReencode(UniqueIdentifierUUID.self, $0, $1) }),
     ]
 }
 
-func oracleEncode<T: CDREncodable>(_ value: T) throws -> Data {
-    let encoder = CDREncoder()
+func oracleEncode<T: CDREncodable>(_ value: T, _ schema: ROS2Distro?) throws -> Data {
+    let encoder = schema.map { CDREncoder(distro: $0) } ?? CDREncoder()
     encoder.writeEncapsulationHeader()
     try value.encode(to: encoder)
     return encoder.getData()
 }
 
-func oracleReencode<T: CDRCodable>(_ type: T.Type, _ data: Data) throws -> Data {
-    try oracleEncode(T(from: CDRDecoder(data: data)))
+func oracleReencode<T: CDRCodable>(_ type: T.Type, _ data: Data, _ schema: ROS2Distro?) throws -> Data {
+    let decoder = try schema.map { try CDRDecoder(data: data, distro: $0) } ?? CDRDecoder(data: data)
+    return try oracleEncode(T(from: decoder), schema)
 }
