@@ -17,9 +17,28 @@ public final class CDREncoder {
     /// Fixed at construction so a partially-written buffer cannot change variants mid-encode.
     public let isLegacySchema: Bool
 
+    /// The raw value of the ROS 2 distribution whose message schemas this encoder writes
+    /// (`"lyrical"`), or nil for an encoder made with ``init(estimatedSize:isLegacySchema:)``.
+    ///
+    /// This module cannot name `ROS2Distro`; `SwiftROS2Messages` sets this value through
+    /// `CDREncoder(distro:)` and reads it back as `schemaDistro`, which generated types compare
+    /// against to write a field only on the distributions that have it.
+    public let schemaDistroName: String?
+
+    /// Creates an encoder for the Humble schema (`isLegacySchema`) or the Jazzy schema.
     public init(estimatedSize: Int = 256, isLegacySchema: Bool = false) {
         buffer = Data(capacity: estimatedSize)
         self.isLegacySchema = isLegacySchema
+        self.schemaDistroName = nil
+    }
+
+    /// Creates an encoder for the schemas of the distribution named `schemaDistroName`.
+    /// `isLegacySchema` must be true exactly for a distribution that uses the pre-Iron schemas
+    /// (Humble). Prefer `CDREncoder(distro:)` from `SwiftROS2Messages`, which sets both.
+    public init(estimatedSize: Int = 256, schemaDistroName: String, isLegacySchema: Bool) {
+        buffer = Data(capacity: estimatedSize)
+        self.isLegacySchema = isLegacySchema
+        self.schemaDistroName = schemaDistroName
     }
 
     public func reset() {

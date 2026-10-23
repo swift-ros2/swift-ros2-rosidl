@@ -3,9 +3,10 @@
 
 /// A ROS 2 distribution.
 ///
-/// Generated message types read ``isLegacySchema`` to pick their wire shape and type hash.
+/// Generated message types read ``isLegacySchema``, or compare a codec's `schemaDistro` with a
+/// distribution (`encoder.schemaDistro >= .lyrical`), to pick their wire shape and type hash.
 /// New distributions are added in minor releases, so a `switch` over this enum needs a
-/// `default` branch.
+/// `default` branch; prefer comparisons, which keep their meaning when a distribution is added.
 public enum ROS2Distro: String, CaseIterable, Sendable {
     case humble
     case jazzy
@@ -22,4 +23,24 @@ public enum ROS2Distro: String, CaseIterable, Sendable {
     /// Whether this distribution uses the pre-Iron message schemas, for example
     /// `sensor_msgs/Range` without `variance`. Only Humble does.
     public var isLegacySchema: Bool { self == .humble }
+
+    /// Position in release order. Rolling is always last; a distribution added later goes
+    /// before it.
+    private var releaseIndex: Int {
+        switch self {
+        case .humble: return 0
+        case .jazzy: return 1
+        case .kilted: return 2
+        case .lyrical: return 3
+        case .rolling: return 4
+        }
+    }
+}
+
+extension ROS2Distro: Comparable {
+    /// Release order, which is ``allCases`` order: an older distribution is less than a newer
+    /// one, and Rolling is always the greatest.
+    public static func < (lhs: ROS2Distro, rhs: ROS2Distro) -> Bool {
+        lhs.releaseIndex < rhs.releaseIndex
+    }
 }

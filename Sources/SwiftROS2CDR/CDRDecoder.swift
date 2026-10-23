@@ -65,14 +65,40 @@ public final class CDRDecoder {
     /// Fixed at construction so decoding a partially-consumed buffer cannot change variants.
     public let isLegacySchema: Bool
 
+    /// The raw value of the ROS 2 distribution whose message schemas this decoder reads
+    /// (`"lyrical"`), or nil for a decoder made with ``init(data:isLegacySchema:)``.
+    ///
+    /// This module cannot name `ROS2Distro`; `SwiftROS2Messages` sets this value through
+    /// `CDRDecoder(data:distro:)` and reads it back as `schemaDistro`, which generated types
+    /// compare against to read a field only on the distributions that have it.
+    public let schemaDistroName: String?
+
     /// Create a decoder from CDR data (validates encapsulation header)
     public init(data: Data, isLegacySchema: Bool = false) throws {
+        try Self.validateEncapsulationHeader(data)
         self.isLegacySchema = isLegacySchema
+        self.schemaDistroName = nil
+        self.data = data
+        self.offset = Self.encapsulationHeaderSize
+    }
+
+    /// Creates a decoder for the schemas of the distribution named `schemaDistroName` (validates
+    /// the encapsulation header). `isLegacySchema` must be true exactly for a distribution that
+    /// uses the pre-Iron schemas (Humble). Prefer `CDRDecoder(data:distro:)` from
+    /// `SwiftROS2Messages`, which sets both.
+    public init(data: Data, schemaDistroName: String, isLegacySchema: Bool) throws {
+        try Self.validateEncapsulationHeader(data)
+        self.isLegacySchema = isLegacySchema
+        self.schemaDistroName = schemaDistroName
+        self.data = data
+        self.offset = Self.encapsulationHeaderSize
+    }
+
+    /// Throws unless `data` starts with the XCDR v1 little-endian header `[0x00, 0x01, 0x00, 0x00]`.
+    private static func validateEncapsulationHeader(_ data: Data) throws {
         guard data.count >= 4 else {
             throw CDRDecodingError.invalidEncapsulationHeader
         }
-
-        // Validate XCDR v1 little-endian header: [0x00, 0x01, 0x00, 0x00]
         guard data[data.startIndex] == 0x00,
             data[data.startIndex + 1] == 0x01,
             data[data.startIndex + 2] == 0x00,
@@ -80,9 +106,6 @@ public final class CDRDecoder {
         else {
             throw CDRDecodingError.invalidEncapsulationHeader
         }
-
-        self.data = data
-        self.offset = Self.encapsulationHeaderSize
     }
 
     /// Remaining bytes available
