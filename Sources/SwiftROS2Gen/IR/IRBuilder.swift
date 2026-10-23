@@ -446,9 +446,12 @@ extension IRBuilder {
 
     /// Build a unified IR from one parsed IDL per distro.
     ///
-    /// Walks `idls` in `distroOrder`. For each distro, fields appear in source
-    /// order; new fields are appended at the position they first surface. Each
-    /// resulting `FieldIR.availability` reflects the set of distros that
+    /// Walks `idls` in `distroOrder`. The merged field order keeps every distro's own
+    /// order: a field a later distro adds sits where that distro has it, after the field
+    /// that precedes it there, so projecting the merged fields onto any distro gives that
+    /// distro's IDL order. Where the distros leave the order open (a field one distro
+    /// dropped and another added at the same place), the older distro's field comes first.
+    /// Each resulting `FieldIR.availability` reflects the set of distros that
     /// declared the field, simplified to `.all` when every input distro had it.
     ///
     /// Constants and defaults are taken from the latest (highest-precedence)
@@ -458,9 +461,10 @@ extension IRBuilder {
     /// in conflict detection.
     ///
     /// Throws `IRMergeError.conflictingFieldType` when the same `ros2Name`
-    /// resolves to incompatible `FieldType`s across distros, and
+    /// resolves to incompatible `FieldType`s across distros,
     /// `IRMergeError.identityMismatch` when distros disagree on the package
-    /// or type name.
+    /// or type name, and ``IRBuildError`` when two distros have shared fields in a
+    /// different order (no single field order matches every distro's wire layout).
     public static func build(
         perDistro idls: [String: IDLFile],
         kind: MessageKind = .msg
@@ -486,8 +490,10 @@ extension IRBuilder {
         // Walk the distros in canonical order; only consider distros actually present.
         let orderedDistros = distroOrder.filter { idls[$0] != nil }
 
-        // Track field types and the distros each field appears in.
+        // Track field types and the distros each field appears in. `fieldOrder` is the
+        // first-seen order, which breaks ties in the merged order below.
         var fieldOrder: [String] = []
+        var fieldListPerDistro: [(distro: String, fields: [String])] = []
         var fieldTypeByName: [String: FieldType] = [:]
         // Carry through the field-level metadata (default, swiftName) of the
         // latest distro that declared the field; newer distros win.
@@ -499,9 +505,10 @@ extension IRBuilder {
         for distro in orderedDistros {
             let idl = idls[distro]!
             var thisDistroPresence: Set<String> = []
+            var thisDistroFields: [String] = []
             for f in idl.fields {
                 let irType = lift(f.type, currentPackage: idl.package)
-                thisDistroPresence.insert(f.name)
+                if thisDistroPresence.insert(f.name).inserted { thisDistroFields.append(f.name) }
                 if let existing = fieldTypeByName[f.name] {
                     if existing != irType {
                         var bucket = fieldTypeConflict[f.name] ?? [:]
@@ -526,6 +533,7 @@ extension IRBuilder {
                 presenceByName[f.name, default: []].insert(distro)
             }
             presencePerDistro[distro] = thisDistroPresence
+            fieldListPerDistro.append((distro, thisDistroFields))
         }
 
         if let (name, perDistroTypes) = fieldTypeConflict.first {
@@ -535,8 +543,12 @@ extension IRBuilder {
             )
         }
 
+        let mergedOrder = try mergeFieldOrder(
+            fieldListPerDistro, firstSeen: fieldOrder,
+            typeName: "\(canonicalPackage)/\(kind.rawValue)/\(canonicalType)")
+
         let allDistros = Set(orderedDistros)
-        let fields: [FieldIR] = fieldOrder.map { name in
+        let fields: [FieldIR] = mergedOrder.map { name in
             let type = fieldTypeByName[name]!
             let presence = presenceByName[name]!
             let availability: FieldAvailability =
@@ -579,5 +591,71 @@ extension IRBuilder {
             perDistroHashes: [:],  // populated by the pipeline
             perDistroFieldPresence: presencePerDistro
         )
+    }
+
+    /// One field order that every distro's own order is a subsequence of: a topological sort
+    /// of "precedes" in each distro, taking among the fields that are free to go next the one
+    /// seen first in `firstSeen` (the older distro's order). For distros that agree on the
+    /// order of their shared fields this is `firstSeen` with each added field moved to where
+    /// its distro has it.
+    ///
+    /// - Throws: ``IRBuildError`` when shared fields are in a different order in two distros.
+    static func mergeFieldOrder(
+        _ lists: [(distro: String, fields: [String])],
+        firstSeen: [String],
+        typeName: String
+    ) throws -> [String] {
+        let rank = Dictionary(uniqueKeysWithValues: firstSeen.enumerated().map { ($1, $0) })
+        var successors: [String: Set<String>] = [:]
+        var predecessorCount: [String: Int] = Dictionary(uniqueKeysWithValues: firstSeen.map { ($0, 0) })
+        for list in lists {
+            for (a, b) in zip(list.fields, list.fields.dropFirst())
+            where successors[a, default: []].insert(b).inserted {
+                predecessorCount[b, default: 0] += 1
+            }
+        }
+        var merged: [String] = []
+        var ready = Set(firstSeen.filter { predecessorCount[$0] == 0 })
+        while let next = ready.min(by: { rank[$0]! < rank[$1]! }) {
+            ready.remove(next)
+            merged.append(next)
+            for successor in successors[next] ?? [] {
+                predecessorCount[successor]! -= 1
+                if predecessorCount[successor] == 0 { ready.insert(successor) }
+            }
+        }
+        guard merged.count == firstSeen.count else {
+            throw reorderError(lists, unordered: firstSeen.filter { !merged.contains($0) }, typeName: typeName)
+        }
+        // Every distro reads the merged fields it has in its own order.
+        for list in lists {
+            let present = Set(list.fields)
+            guard merged.filter(present.contains) == list.fields else {
+                throw IRBuildError("\(typeName): the merged field order does not match \(list.distro)")
+            }
+        }
+        return merged
+    }
+
+    /// The error for distros whose shared fields cannot be put in one order: the first pair
+    /// of fields two distros order differently, or, when no two distros disagree directly,
+    /// the fields left unordered.
+    private static func reorderError(
+        _ lists: [(distro: String, fields: [String])], unordered: [String], typeName: String
+    ) -> IRBuildError {
+        for (i, earlier) in lists.enumerated() {
+            let position = Dictionary(uniqueKeysWithValues: earlier.fields.enumerated().map { ($1, $0) })
+            for later in lists[(i + 1)...] {
+                let shared = later.fields.filter { position[$0] != nil }
+                for (a, b) in zip(shared, shared.dropFirst()) where position[a]! > position[b]! {
+                    return IRBuildError(
+                        "\(typeName): fields '\(b)', '\(a)' are in a different order in \(later.distro) than in \(earlier.distro)"
+                    )
+                }
+            }
+        }
+        let names = unordered.map { "'\($0)'" }.joined(separator: ", ")
+        return IRBuildError(
+            "\(typeName): fields \(names) cannot be put in one order that matches every distribution")
     }
 }
