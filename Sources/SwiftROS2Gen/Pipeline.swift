@@ -23,8 +23,9 @@ public enum GeneratorError: Error, CustomStringConvertible {
     case unresolvedNestedType(package: String, typeName: String)
     /// A package is passed both as an emitted input and as a dependency-only input.
     case conflictingPackageRoles(String)
-    /// A field exists in only some modern distributions (Jazzy and later), which generated
-    /// types cannot express.
+    /// A field exists in distributions that are not one contiguous run of the distributions
+    /// read for its type, for example in Jazzy and Lyrical but not Kilted between them.
+    /// `missingFrom` lists the read distributions between them that lack it.
     case modernDistroDivergence(type: String, field: String, presentIn: [String], missingFrom: [String])
 
     public var description: String {
@@ -39,8 +40,9 @@ public enum GeneratorError: Error, CustomStringConvertible {
         case .conflictingPackageRoles(let name):
             return "package '\(name)' is passed both as --input and as --dependency"
         case .modernDistroDivergence(let type, let field, let presentIn, let missingFrom):
+            func list(_ distros: [String]) -> String { "[" + distros.joined(separator: ", ") + "]" }
             return
-                "\(type): field '\(field)' exists in \(presentIn) but not in \(missingFrom) — generated types support one modern shape (Jazzy and later); differences among modern distributions are not supported"
+                "\(type): field '\(field)' exists in \(list(presentIn)) but not in \(list(missingFrom)) between them — a field must exist in one contiguous run of distributions"
         }
     }
 }
@@ -164,18 +166,23 @@ extension Pipeline {
         }
     }
 
-    /// Generated types model two wire shapes: legacy (Humble) and modern (every later
-    /// distribution). A field present in only some modern distributions cannot be expressed,
-    /// so generation stops instead of emitting one distribution's shape for all of them.
-    static func validateModernAgreement(_ ir: MessageIR) throws {
-        let modern = Set(ir.perDistroFieldPresence.keys).subtracting(["humble"])
+    /// Generated code tells whether a distribution has a field by comparing it with the first
+    /// read distribution that has the field and the first one after them that lacks it
+    /// (`schemaDistro >= .lyrical`), so a field must exist in one contiguous run of the
+    /// distributions `readDistros` read for its type, Humble included. Generation stops on a
+    /// field that is missing from a read distribution between two that have it.
+    static func validateDistroAvailability(_ ir: MessageIR, readDistros: Set<String>) throws {
+        let ordered = IRBuilder.distroOrder.filter(readDistros.contains)
         for field in ir.fields {
-            guard case .onlyIn(let distros) = field.availability, distros != ["humble"] else { continue }
-            let present = distros.subtracting(["humble"])
-            if present != modern {
+            guard case .onlyIn(let present) = field.availability,
+                let first = ordered.firstIndex(where: present.contains),
+                let last = ordered.lastIndex(where: present.contains)
+            else { continue }
+            let gap = ordered[first...last].filter { !present.contains($0) }
+            if !gap.isEmpty {
                 throw GeneratorError.modernDistroDivergence(
                     type: ir.rosTypeName, field: field.ros2Name,
-                    presentIn: present.sorted(), missingFrom: modern.subtracting(present).sorted())
+                    presentIn: ordered.filter(present.contains), missingFrom: gap)
             }
         }
     }
@@ -235,7 +242,7 @@ extension Pipeline {
                 // Multi-distro path: parse each run's IDLs, group by type name,
                 // then merge per-distro IDLs via IRBuilder.build(perDistro:).
                 for entry in try parseAndMergeMultiDistroPackage(runs: pkgRuns) {
-                    try validateModernAgreement(entry.ir)
+                    try validateDistroAvailability(entry.ir, readDistros: entry.distros)
                     unresolvedIRs.append(
                         CollectedIR(
                             ir: entry.ir, sourceLabel: entry.sourceLabel,
@@ -363,45 +370,26 @@ extension Pipeline {
         moduleNames: ModuleNames = [:]
     ) throws -> [GeneratedFile] {
         let c = try collect(runs)
-        // Precompute the modern (jazzy-view) hash for every IR. Single-distro
-        // humble-only inputs do not need a Jazzy hash (humble has no RIHS01
-        // anyway), but computing it is cheap and the per-distro projection
-        // below decides whether to emit it. Hashing is per-distro so nested
-        // type lookups in the registry get the same field projection as the
-        // root.
-        var hashByRosName: [String: String] = [:]
+        // Every type gets the hash of every modern distribution, projected onto it: each type in
+        // the registry takes its own shape for that distribution (its schema distribution when
+        // it was not read for it), as generated code encodes it. A type that reaches a varying
+        // type (at any depth, across packages, even one read for more distributions than the
+        // type itself) varies as well; equal hashes collapse into one `typeInfo`. Humble has no
+        // RIHS01 and never gets a key, so a type that only differs on Humble keeps one hash.
+        var hashesByRosName: [String: [String: String]] = [:]
         for entry in c.unresolvedIRs {
-            hashByRosName[entry.ir.rosTypeName] = RIHS01.hash(
-                entry.ir, for: "jazzy", registry: c.registry)
+            var hashes: [String: String] = [:]
+            for distro in IRBuilder.modernDistros {
+                hashes[distro] = RIHS01.hash(entry.ir, for: distro, registry: c.registry)
+            }
+            hashesByRosName[entry.ir.rosTypeName] = hashes
         }
         var results: [GeneratedFile] = []
         for entry in c.unresolvedIRs {
-            guard let primaryHash = hashByRosName[entry.ir.rosTypeName] else {
+            guard let hashes = hashesByRosName[entry.ir.rosTypeName] else {
                 preconditionFailure(
                     "Pipeline: missing precomputed hash for \(entry.ir.rosTypeName)"
                 )
-            }
-            // The distributions whose IDL has the type (see ``CollectedIR/distros``). For a
-            // humble-only type the emitted `typeInfo` advertises a `nil` humble hash.
-            let distros = entry.distros
-            var perDistroHashes: [String: String?] = [:]
-            for distro in distros {
-                if distro == "humble" {
-                    // Humble has no RIHS01 — present in this distro, hash is nil.
-                    perDistroHashes["humble"] = nil
-                } else if IRBuilder.modernDistros.contains(distro) {
-                    // Modern distros share the jazzy wire format and hash.
-                    perDistroHashes[distro] = primaryHash
-                }
-            }
-            // The non-conditional emit path keys on `perDistroHashes["jazzy"]`
-            // for the static `typeInfo` constant. A humble-only single-distro
-            // run does not naturally fill this in — plumb the primary
-            // (computed-from-current-fields) hash so the emitter has
-            // something to render. The conditional path uses the presence
-            // map to decide which distros actually advertise the type.
-            if perDistroHashes["jazzy"] == nil {
-                perDistroHashes["jazzy"] = primaryHash
             }
             let hashed = MessageIR(
                 package: entry.ir.package,
@@ -409,7 +397,7 @@ extension Pipeline {
                 kind: entry.ir.kind,
                 fields: entry.ir.fields,
                 constants: entry.ir.constants,
-                perDistroHashes: perDistroHashes,
+                perDistroHashes: hashes.mapValues { Optional($0) },
                 perDistroFieldPresence: entry.ir.perDistroFieldPresence
             )
             let key = "\(entry.ir.package)/\(entry.ir.kind.rawValue)/\(entry.ir.typeName)"
@@ -448,11 +436,15 @@ extension Pipeline {
         for svc in c.collectedServices where !c.dependencyPackages.contains(svc.package) {
             let reqKey = "\(svc.package)/srv/\(svc.typeName)_Request"
             let resKey = "\(svc.package)/srv/\(svc.typeName)_Response"
-            let requestHash = hashByRosName[reqKey]
-            let responseHash = hashByRosName[resKey]
-            let serviceHash = RIHS01.hash(
-                ServiceDescription.serviceIR(package: svc.package, kind: .srv, serviceName: svc.typeName),
-                for: "jazzy", registry: c.registry)
+            let serviceIR = ServiceDescription.serviceIR(
+                package: svc.package, kind: .srv, serviceName: svc.typeName)
+            var hashesByDistro: [String: ServiceHashes] = [:]
+            for distro in IRBuilder.modernDistros {
+                hashesByDistro[distro] = ServiceHashes(
+                    requestHash: hashesByRosName[reqKey]?[distro],
+                    responseHash: hashesByRosName[resKey]?[distro],
+                    serviceHash: RIHS01.hash(serviceIR, for: distro, registry: c.registry))
+            }
             let requestStructName = c.nameOverrides[reqKey] ?? "\(svc.typeName)Request"
             let responseStructName = c.nameOverrides[resKey] ?? "\(svc.typeName)Response"
             let umbrellaName = "\(svc.typeName)Srv"
@@ -462,9 +454,7 @@ extension Pipeline {
                 umbrellaName: umbrellaName,
                 requestStructName: requestStructName,
                 responseStructName: responseStructName,
-                requestHash: requestHash,
-                responseHash: responseHash,
-                serviceHash: serviceHash,
+                hashesByDistro: hashesByDistro,
                 sourceLabel: sourceLabel(package: svc.package, typeName: svc.typeName, kind: .srv),
                 moduleNames: moduleNames
             )
@@ -479,12 +469,13 @@ extension Pipeline {
         // outer `<TypeName>Action` enum (with nested `Goal` / `Result` /
         // `Feedback`) plus the five sibling `<TypeName>_<Wrapper>` structs.
         // The action-level + wrapper hashes come from
-        // ``IRBuilder/populateActionHashes(_:distro:extraRegistry:)`` which
-        // reuses the global registry assembled above.
+        // ``IRBuilder/populateActionHashes(_:distro:extraRegistry:)``, once per modern
+        // distribution, which reuses the global registry assembled above.
         for act in c.collectedActions where !c.dependencyPackages.contains(act.package) {
             var actionIR = act.actionIR
-            IRBuilder.populateActionHashes(
-                &actionIR, distro: "jazzy", extraRegistry: c.registry)
+            for distro in IRBuilder.modernDistros {
+                IRBuilder.populateActionHashes(&actionIR, distro: distro, extraRegistry: c.registry)
+            }
             let swift = SwiftEmitter.emit(
                 actionIR,
                 sourceLabel: sourceLabel(package: act.package, typeName: act.typeName, kind: .action),

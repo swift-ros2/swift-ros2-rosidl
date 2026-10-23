@@ -41,6 +41,10 @@ public enum RIHS01 {
     /// the recursive projection a parent type whose nested type also has
     /// distro-conditional fields would hash with the nested type's full
     /// (jazzy-shaped) field list even when computing the humble view.
+    ///
+    /// A merged IR projected for a distro it was not read for takes the shape of its schema
+    /// distro (``IRBuilder/schemaDistro(for:read:)``): Rolling without Rolling IDL has the
+    /// newest read distro's fields, as generated code encodes them.
     public static func hash(
         _ ir: MessageIR,
         for distro: String,
@@ -55,7 +59,10 @@ public enum RIHS01 {
     /// `availability` excludes that distro. Constants and per-distro metadata
     /// are preserved unchanged.
     private static func projected(_ ir: MessageIR, for distro: String) -> MessageIR {
-        let scopedFields = ir.fields.filter { $0.availability.includes(distro) }
+        let shape =
+            ir.perDistroFieldPresence.isEmpty
+            ? distro : IRBuilder.schemaDistro(for: distro, read: Set(ir.perDistroFieldPresence.keys))
+        let scopedFields = ir.fields.filter { $0.availability.includes(shape) }
         return MessageIR(
             package: ir.package,
             typeName: ir.typeName,

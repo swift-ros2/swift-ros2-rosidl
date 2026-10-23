@@ -52,6 +52,35 @@ struct PipelineMultiDistroSmokeTests {
     }
 }
 
+@Suite("Pipeline output for a Humble-only difference")
+struct PipelineHumbleSplitByteIdenticalTests {
+    @Test("sensor_msgs/Range read for every distribution emits the 1.0 output")
+    func rangeReadForEveryDistribution() throws {
+        // Range without `variance` on Humble, with it on Jazzy, Kilted and Lyrical: the one
+        // conditional type 1.0 ships (swift-ros2-common-interfaces `RangeMsg`). Reading every
+        // modern distribution must not change it.
+        let humble =
+            "std_msgs/Header header\nuint8 radiation_type\nfloat32 field_of_view\n"
+            + "float32 min_range\nfloat32 max_range\nfloat32 range\n"
+        let modern = humble + "float32 variance\n"
+        var bodies = ["humble": ["msg/Range.msg": humble]]
+        for distro in ["jazzy", "kilted", "lyrical"] { bodies[distro] = ["msg/Range.msg": modern] }
+        let fixture = try MultiDistroFixture(bodies, package: "sensor_msgs")
+        defer { fixture.remove() }
+        let header = try #require(
+            Bundle.module.url(forResource: "std_msgs_with_header", withExtension: nil, subdirectory: "Resources/IDL"))
+        let runs =
+            fixture.runs + [Pipeline.PackageRun(input: PackageInput(name: "std_msgs", directory: header), emit: false)]
+        let range = try #require(
+            try Pipeline.generateMulti(runs).first { $0.relativePath == "SensorMsgs/RangeMsg.swift" })
+        let goldenURL = try #require(
+            Bundle.module.url(forResource: "RangeMsg", withExtension: "swift", subdirectory: "Resources/Golden"))
+        let golden = try String(contentsOf: goldenURL, encoding: .utf8)
+            .replacingOccurrences(of: "// Source: common_interfaces-multi/", with: "// Source: ")
+        #expect(range.contents == golden, "Range emit mismatch:\n\(range.contents)")
+    }
+}
+
 @Suite("Pipeline multi-distro end-to-end on vendor sensor_msgs")
 struct PipelineMultiDistroEndToEndTests {
     @Test("emits byte-identical files to those checked into Generated/SensorMsgs")

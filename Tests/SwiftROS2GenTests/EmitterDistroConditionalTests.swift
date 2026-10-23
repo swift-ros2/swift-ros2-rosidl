@@ -57,4 +57,33 @@ struct EmitterDistroConditionalTests {
         let golden = try String(contentsOf: goldenURL, encoding: .utf8)
         #expect(actual == golden, "Range emit mismatch:\n--- actual ---\n\(actual)")
     }
+
+    private func golden(_ name: String, subdirectory: String = "Resources/Golden") throws -> String {
+        let url = try #require(Bundle.module.url(forResource: name, withExtension: "swift", subdirectory: subdirectory))
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    @Test("emits a schemaDistro guard and a typeInfo ladder for a modern difference")
+    func emitsModernVarying() throws {
+        // `fixture_msgs/msg/ModernVarying` read for Humble, Jazzy, Kilted and Lyrical: a field
+        // from Jazzy on (the 1.0 Humble guard), one in Kilted alone, one before Lyrical and one
+        // from Lyrical on; and an action whose goal holds one.
+        let fixture = try MultiDistroFixture(MultiDistroFixture.modernVarying)
+        defer { fixture.remove() }
+        let files = try fixture.generate()
+        let message = try #require(files["FixtureMsgs/ModernVarying.swift"])
+        #expect(message == (try golden("ModernVarying")), "ModernVarying emit mismatch:\n\(message)")
+        let action = try #require(files["FixtureMsgs/ModernVaryingAction.swift"])
+        #expect(
+            action == (try golden("ModernVaryingAction", subdirectory: "Resources/Golden/Action")),
+            "ModernVaryingAction emit mismatch:\n\(action)")
+    }
+
+    @Test("the CDR tests compile the ModernVarying golden")
+    func cdrFixtureIsTheGolden() throws {
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("SwiftROS2CDRTests/Fixtures/ModernVarying.swift")
+        #expect(try String(contentsOf: fixture, encoding: .utf8) == (try golden("ModernVarying")))
+    }
 }

@@ -448,6 +448,21 @@ extension IRBuilder {
     /// precedence source for the emitted modern `typeInfo` hash.
     public static let modernDistros: [String] = distroOrder.filter { $0 != "humble" }
 
+    /// The distro whose IDL gives a type read for the distros `read` its shape and hash on
+    /// `distro`: `distro` itself when it was read, else the newest read distro older than
+    /// `distro`, else (every read distro is newer) the oldest read one. Rolling without Rolling
+    /// IDL takes the newest named distro read; an unread Kilted between read Jazzy and Lyrical
+    /// takes Jazzy. A name outside ``distroOrder``, or an empty `read`, returns `distro`.
+    ///
+    /// Generated field guards (`schemaDistro >= .lyrical`), the per-distro hashes, the hash
+    /// verify plan and the oracle samples all follow this rule.
+    public static func schemaDistro(for distro: String, read: Set<String>) -> String {
+        guard !read.contains(distro), let index = distroOrder.firstIndex(of: distro) else { return distro }
+        let ordered = distroOrder.filter(read.contains)
+        guard let oldest = ordered.first else { return distro }
+        return ordered.last { distroOrder.firstIndex(of: $0)! < index } ?? oldest
+    }
+
     /// Build a unified IR from one parsed IDL per distro.
     ///
     /// Walks `idls` in `distroOrder`. The merged field order keeps every distro's own
