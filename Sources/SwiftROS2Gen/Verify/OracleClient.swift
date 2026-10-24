@@ -67,6 +67,41 @@ public struct OracleClient: Sendable {
         }
     }
 
+    #if os(macOS) || os(Linux) || os(Windows)
+        struct ProcessOutput {
+            var status: Int32
+            var stdout: Data
+            var stderr: Data
+        }
+
+        /// Runs `process` with its stdout and stderr captured, and returns both once it exits.
+        /// Both pipes are drained while the process runs: a `<Type>.json` can be far larger
+        /// than a pipe buffer (64 KiB), and a writer blocked on a full pipe never exits.
+        static func runCollectingOutput(_ process: Process) throws -> ProcessOutput {
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+            try process.run()
+            let stderrBox = DataBox()
+            let stderrDone = DispatchGroup()
+            stderrDone.enter()
+            DispatchQueue.global().async {
+                stderrBox.data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                stderrDone.leave()
+            }
+            let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            stderrDone.wait()
+            process.waitUntilExit()
+            return ProcessOutput(
+                status: process.terminationStatus, stdout: stdout, stderr: stderrBox.data)
+        }
+
+        private final class DataBox: @unchecked Sendable {
+            var data = Data()
+        }
+    #endif
+
     private func runDocker(arguments: [String]) throws -> String {
         #if os(macOS) || os(Linux) || os(Windows)
             let process = Process()
@@ -86,25 +121,19 @@ public struct OracleClient: Sendable {
                 process.arguments = ["docker", "run", "--rm", dockerImage] + arguments
                 let cmdPrefix = ["docker", "run", "--rm", dockerImage]
             #endif
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
+            let output: ProcessOutput
             do {
-                try process.run()
+                output = try Self.runCollectingOutput(process)
             } catch {
                 throw OracleError.dockerNotInstalled
             }
-            process.waitUntilExit()
-            let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            if process.terminationStatus != 0 {
-                let stderr = String(data: errData, encoding: .utf8) ?? ""
+            if output.status != 0 {
+                let stderr = String(data: output.stderr, encoding: .utf8) ?? ""
                 let cmd = (cmdPrefix + arguments).joined(separator: " ")
                 throw OracleError.dockerExitNonZero(
-                    process.terminationStatus, stderr: stderr, command: cmd)
+                    output.status, stderr: stderr, command: cmd)
             }
-            return String(data: outData, encoding: .utf8) ?? ""
+            return String(data: output.stdout, encoding: .utf8) ?? ""
         #else
             // `Process` / `Pipe` are unavailable on embedded Apple platforms
             // (iOS / tvOS / watchOS / visionOS). `--verify-hashes` shells out
