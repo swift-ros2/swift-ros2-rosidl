@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `swift-ros2-gen --verify-hashes` no longer hangs on a `<Type>.json` larger than a pipe
+  buffer (64 KiB), such as the files of `moveit_msgs/action/MoveGroup`: the oracle client
+  reads the output of `docker run` while the container runs instead of after it exits.
+
 ## 1.1.0
 
 Message fields that differ among the distributions after Humble, with one type hash per
