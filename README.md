@@ -35,7 +35,7 @@ that the generated module will depend on, because generated code targets the pro
 release:
 
 ```bash
-git clone --branch 1.1.0 https://github.com/swift-ros2/swift-ros2-rosidl.git
+git clone --branch 1.1.1 https://github.com/swift-ros2/swift-ros2-rosidl.git
 cd swift-ros2-rosidl
 swift run swift-ros2-gen --help
 ```
@@ -209,7 +209,7 @@ let package = Package(
         .library(name: "AudioCommonMsgs", targets: ["AudioCommonMsgs"])
     ],
     dependencies: [
-        .package(url: "https://github.com/swift-ros2/swift-ros2-rosidl.git", from: "1.1.0"),
+        .package(url: "https://github.com/swift-ros2/swift-ros2-rosidl.git", from: "1.1.1"),
         .package(url: "https://github.com/swift-ros2/swift-ros2-common-interfaces.git", from: "1.0.0"),
         .package(url: "https://github.com/swift-ros2/swift-ros2.git", from: "3.0.0"),
     ],
@@ -346,7 +346,7 @@ the reusable workflow at the rosidl version their `Package.resolved` pins:
 ```yaml
 jobs:
   interfaces:
-    uses: swift-ros2/swift-ros2-rosidl/.github/workflows/interface-oracles.yml@1.1.0
+    uses: swift-ros2/swift-ros2-rosidl/.github/workflows/interface-oracles.yml@1.1.1
     with:
       corpus-product: MyInterfacesOracleCorpus
       apt-packages: ros-${distro}-moveit-msgs   # only when the desktop image lacks a package

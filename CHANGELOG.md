@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.1.1
+
+A fix for the oracle check of large types.
 
 ### Fixed
 
