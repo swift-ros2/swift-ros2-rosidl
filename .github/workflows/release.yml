@@ -1,0 +1,67 @@
+name: Release
+
+# Publishes the GitHub release of a version tag (bare semver: 1.2.0, 1.2.0-rc.1).
+# The notes are the tag's section of CHANGELOG.md, followed by GitHub's list of the
+# pull requests merged since the previous release. A tag with a suffix (1.2.0-rc.1)
+# becomes a pre-release; a final version becomes Latest only when it is the highest
+# final version, so a patch on an older line does not take Latest. A release that
+# already exists is left as it is.
+#
+# To publish the release of an existing tag, run this workflow by hand with the tag.
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish the release of"
+        required: true
+
+jobs:
+  release:
+    name: Publish the release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: Take the notes from CHANGELOG.md
+        run: |
+          set -euo pipefail
+          # The lines under "## <tag>", "## <tag> - <date>" or "## [<tag>] - <date>",
+          # up to the next "## " heading.
+          awk -v v="$TAG" '
+            /^## / { if (found) exit; h = $0; sub(/^## \[?/, "", h); split(h, a, /[] ]/); found = (a[1] == v); next }
+            found { print }
+          ' CHANGELOG.md | sed '/./,$!d' > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md has no section for $TAG"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+      - name: Create the release
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; leaving it as it is."
+            exit 0
+          fi
+          case "$TAG" in
+            *-*) kind=(--prerelease --latest=false) ;;
+            *)
+              highest=$(git tag -l '[0-9]*.[0-9]*.[0-9]*' | grep -v -- - | sort -V | tail -n 1)
+              if [ "$TAG" = "$highest" ]; then kind=(--latest); else kind=(--latest=false); fi
+              ;;
+          esac
+          gh release create "$TAG" --title "$TAG" --verify-tag \
+            --notes-file "$RUNNER_TEMP/notes.md" --generate-notes "${kind[@]}"
