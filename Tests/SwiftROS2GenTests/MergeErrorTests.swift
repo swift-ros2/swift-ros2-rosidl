@@ -81,4 +81,49 @@ struct MergeErrorTests {
             #expect(files[path] != nil && files[path] == single[path], "\(path)")
         }
     }
+
+    @Test("a message whose shared fields change order is reported at its line, with both distributions")
+    func messageFieldOrder() throws {
+        let error = try Self.error([
+            "jazzy": ["msg/Foo.msg": "int32 a\nint32 b\n"],
+            "lyrical": ["msg/Foo.msg": "# swapped\nint32 b\nint32 a\n"],
+        ])
+        #expect(
+            error?.hasSuffix(
+                "/lyrical/fixture_msgs/msg/Foo.msg:2: message 'Foo' cannot be merged across distributions: "
+                    + "fields 'a', 'b' are in a different order in lyrical than in jazzy") == true,
+            "\(error ?? "no error")")
+    }
+
+    @Test("a service with a NaN default that is the same in every distribution is generated")
+    func serviceNaNDefault() throws {
+        let fixture = try MultiDistroFixture([
+            "jazzy": ["srv/N.srv": "float64 x nan\n---\nint32 b\n"],
+            "lyrical": ["srv/N.srv": "float64 x nan\n---\nint32 b\n"],
+        ])
+        defer { fixture.remove() }
+        let jazzy = try MultiDistroFixture(["jazzy": ["srv/N.srv": "float64 x nan\n---\nint32 b\n"]])
+        defer { jazzy.remove() }
+        let files = try fixture.generate()
+        let single = try jazzy.generate()
+        #expect(files["FixtureMsgs/NRequest.swift"] != nil)
+        for path in ["FixtureMsgs/NSrv.swift", "FixtureMsgs/NRequest.swift", "FixtureMsgs/NResponse.swift"] {
+            #expect(files[path] != nil && files[path] == single[path], "\(path)")
+        }
+    }
+
+    @Test("a default that is 0.0 in one distribution and -0.0 in the next is merged, the newest winning")
+    func negativeZeroDefault() throws {
+        let fixture = try MultiDistroFixture([
+            "jazzy": ["msg/M.msg": "float64 y 0.0\n"],
+            "lyrical": ["msg/M.msg": "float64 y -0.0\n"],
+        ])
+        defer { fixture.remove() }
+        let lyrical = try MultiDistroFixture(["lyrical": ["msg/M.msg": "float64 y -0.0\n"]])
+        defer { lyrical.remove() }
+        let merged = try #require(try fixture.generate()["FixtureMsgs/M.swift"])
+        let single = try #require(try lyrical.generate()["FixtureMsgs/M.swift"])
+        #expect(merged.contains("-0.0"), "\(merged)")
+        #expect(merged == single)
+    }
 }

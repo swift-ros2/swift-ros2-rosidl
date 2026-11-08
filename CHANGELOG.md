@@ -27,8 +27,13 @@
   a field that skips a distribution (`GeneratorError.modernDistroDivergence`, which the pipeline
   no longer throws), and a `.srv` that differs between distributions, which is still rejected
   (`service 'S' cannot be merged across distributions: response differs in lyrical from jazzy`).
-  A `.srv` whose files differ only in comments or layout is no longer rejected, and an invalid
-  default or constant in a `.srv` names the file's path, as in a `.msg` or `.action`.
+  A `.srv` whose parts parse to the same IDL apart from comments and layout is no longer
+  rejected, and an invalid default or constant in a `.srv` names the file's path, as in a `.msg`
+  or `.action`. A type that is the same in every distribution is decided on the parsed IDL, never
+  on a float comparison, so a `nan` default is the same as itself and `0.0` differs from `-0.0`.
+  Services and actions now use the union of the runs' `--types` lists, as messages already did;
+  only programmatic callers that pass a different list per run are affected, and a run with
+  `nil` adds nothing to the union, as for messages.
 
 ### Fixed
 

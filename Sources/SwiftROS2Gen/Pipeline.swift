@@ -919,6 +919,14 @@ extension Pipeline {
         let path: String
         let idl: [IDLFile]
         let ir: [MessageIR]
+
+        /// Whether `other` has the same parts, as parsed, apart from the lines they were
+        /// written on. Comments and layout never reach the parsed IDL; nothing is compared as a
+        /// number, so a default such as `nan` or `-0.0` is the same as itself and different from
+        /// `0.0`.
+        func sameParts(as other: InterfaceSource) -> Bool {
+            idl.count == other.idl.count && zip(idl, other.idl).allSatisfy { $0.0.sameDeclarations(as: $0.1) }
+        }
     }
 
     /// One message, service or action of a package, from the files of the distributions that
@@ -1030,7 +1038,7 @@ extension Pipeline {
                 package: package, typeName: typeName, kind: kind, distros: Set(sources.keys), oldest: oldest,
                 parts: parts)
         }
-        if sources.values.allSatisfy({ $0.ir == oldest.ir }) {
+        if sources.values.allSatisfy({ $0.sameParts(as: oldest) }) {
             return type(oldest.ir)
         }
         let label = sourceLabel(package: package, typeName: typeName, kind: kind)
@@ -1097,13 +1105,15 @@ extension Pipeline {
             // Reported in the oldest distribution whose parts differ from the oldest one's, at
             // the first field or constant of the first differing part that the oldest one's part
             // does not have (line 1 when the part only lacks some).
-            let differing = IRBuilder.oldestDistro(in: sources.keys.filter { sources[$0]!.ir != oldest.ir })
+            let differing = IRBuilder.oldestDistro(in: sources.keys.filter { !sources[$0]!.sameParts(as: oldest) })
             let source = sources[differing]!
-            let part = oldest.ir.indices.first { source.ir[$0] != oldest.ir[$0] }!
-            let fieldLines = zip(source.ir[part].fields, source.idl[part].fields)
-                .filter { !oldest.ir[part].fields.contains($0.0) }.map(\.1.sourceLine)
-            let constantLines = zip(source.ir[part].constants, source.idl[part].constants)
-                .filter { !oldest.ir[part].constants.contains($0.0) }.map(\.1.sourceLine)
+            let part = oldest.idl.indices.first { !source.idl[$0].sameDeclarations(as: oldest.idl[$0]) }!
+            let fieldLines = source.idl[part].fields
+                .filter { field in !oldest.idl[part].fields.contains { $0.sameDeclaration(as: field) } }
+                .map(\.sourceLine)
+            let constantLines = source.idl[part].constants
+                .filter { constant in !oldest.idl[part].constants.contains { $0.sameDeclaration(as: constant) } }
+                .map(\.sourceLine)
             throw failure(
                 part,
                 "differs in \(differing) from \(oldestDistro) — merging a \(names.type) that differs between distributions is not supported yet",
