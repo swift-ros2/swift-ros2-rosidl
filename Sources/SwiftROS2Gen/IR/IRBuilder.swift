@@ -271,7 +271,7 @@ extension IRBuilder {
     ///   distributions have the shared fields of a part in a different order.
     public static func build(perDistro actions: [String: IDLAction]) throws -> ActionIR {
         precondition(!actions.isEmpty, "IRBuilder.build(perDistro:) needs at least one action")
-        let oldest = distroOrder.first { actions[$0] != nil } ?? actions.keys.sorted()[0]
+        let oldest = oldestDistro(in: actions.keys)
         let identity = actions[oldest]!
         let goal = try build(perDistro: actions.mapValues(\.goal), kind: .action)
         let result = try build(perDistro: actions.mapValues(\.result), kind: .action)
@@ -488,6 +488,12 @@ extension IRBuilder {
     /// after Humble, in `distroOrder` order. Jazzy comes first, so it stays the
     /// precedence source for the emitted modern `typeInfo` hash.
     public static let modernDistros: [String] = distroOrder.filter { $0 != "humble" }
+
+    /// The oldest of `distros` in ``distroOrder``; when none of them is in it, the first in
+    /// alphabetical order. `distros` must not be empty.
+    static func oldestDistro(in distros: some Collection<String>) -> String {
+        distroOrder.first(where: distros.contains) ?? distros.sorted()[0]
+    }
 
     /// The distro whose IDL gives a type read for the distros `read` its shape and hash on
     /// `distro`: `distro` itself when it was read, else the newest read distro older than

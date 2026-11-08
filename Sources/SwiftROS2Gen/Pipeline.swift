@@ -1079,7 +1079,7 @@ extension Pipeline {
         return try order.map { name in
             let sources = sourcesByName[name]!
             let distros = Set(sources.keys)
-            let oldest = sources[IRBuilder.distroOrder.first { sources[$0] != nil } ?? sources.keys.sorted()[0]]!
+            let oldest = sources[IRBuilder.oldestDistro(in: sources.keys)]!
             if sources.values.allSatisfy({ $0.action == oldest.action }) {
                 return (oldest.action, distros)
             }
