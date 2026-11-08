@@ -25,6 +25,21 @@ struct ActionMergeTests {
         }
     }
 
+    /// The hash of every `fixture_msgs` type in the verify plan of `runs` for `distro`, by ROS type name.
+    static func hashes(_ runs: [Pipeline.PackageRun], _ distro: String) throws -> [String: String] {
+        Dictionary(
+            uniqueKeysWithValues: try Pipeline.buildVerifyPlan(runs)
+                .filter { $0.package == "fixture_msgs" && $0.distro == distro }
+                .map { ($0.rosTypeName, $0.expectedHash) })
+    }
+
+    /// The `public struct <name>` of the action enum in `source`, through its closing brace.
+    static func part(_ name: String, in source: String) throws -> Substring {
+        let start = try #require(source.range(of: "    public struct \(name): CDRCodable"))
+        let end = try #require(source.range(of: "\n    }\n", range: start.upperBound..<source.endIndex))
+        return source[start.lowerBound..<end.upperBound]
+    }
+
     @Test("the goal, result and feedback are merged like messages, the wrappers are shared")
     func buildMergesTheParts() throws {
         let idl = try Self.mergeIDL()
@@ -59,22 +74,16 @@ struct ActionMergeTests {
 
     @Test("each distribution has the hashes of its own .action, the wrappers and services included")
     func hashesAreProjectedPerDistribution() throws {
-        func hashes(_ runs: [Pipeline.PackageRun], _ distro: String) throws -> [String: String] {
-            Dictionary(
-                uniqueKeysWithValues: try Pipeline.buildVerifyPlan(runs)
-                    .filter { $0.package == "fixture_msgs" && $0.distro == distro }
-                    .map { ($0.rosTypeName, $0.expectedHash) })
-        }
         let merged = try Self.merging()
         defer { merged.remove() }
         var own: [String: [String: String]] = [:]
         for distro in ["jazzy", "kilted", "lyrical"] {
             let single = try Self.merging([distro])
             defer { single.remove() }
-            own[distro] = try hashes(single.runs, distro)
+            own[distro] = try Self.hashes(single.runs, distro)
             // The action, its 3 parts, 5 wrappers, the 2 services and their events.
             #expect(own[distro]?.count == 13)
-            #expect(try hashes(merged.runs, distro) == own[distro], "\(distro)")
+            #expect(try Self.hashes(merged.runs, distro) == own[distro], "\(distro)")
         }
 
         // Kilted changes the goal and Lyrical the feedback; the result differs only on Humble
@@ -100,21 +109,16 @@ struct ActionMergeTests {
         let fixture = try Self.merging()
         defer { fixture.remove() }
         let source = try #require(try fixture.generate()["FixtureMsgs/MergeAction.swift"])
-        func part(_ name: String) throws -> Substring {
-            let start = try #require(source.range(of: "    public struct \(name): CDRCodable"))
-            let end = try #require(source.range(of: "\n    }\n", range: start.upperBound..<source.endIndex))
-            return source[start.lowerBound..<end.upperBound]
-        }
         let indent = "            "
-        let result = try part("Result")
+        let result = try Self.part("Result", in: source)
         #expect(result.contains("\(indent)if encoder.isLegacySchema {\n\(indent)    try result.encode(to: encoder)"))
         #expect(result.contains("\(indent)if !encoder.isLegacySchema {\n\(indent)    encoder.writeUInt16(errorCode)"))
         #expect(result.contains("        public static let GOAL_REJECTED: UInt16 = 1\n"))
-        let goal = try part("Goal")
+        let goal = try Self.part("Goal", in: source)
         #expect(goal.contains("        /// Kilted and later only. Not encoded for an earlier distribution;"))
         #expect(
             goal.contains("\(indent)if encoder.schemaDistro >= .kilted {\n\(indent)    encoder.writeString(behavior)"))
-        let feedback = try part("Feedback")
+        let feedback = try Self.part("Feedback", in: source)
         #expect(feedback.contains("        /// Lyrical and later only."))
         #expect(
             feedback.contains(
@@ -140,6 +144,46 @@ struct ActionMergeTests {
             let url = fixtures.appendingPathComponent(committed)
             #expect(try String(contentsOf: url, encoding: .utf8) == file.contents, "\(committed)")
         }
+    }
+
+    @Test("a merged part writes and reads the placeholder byte in a distribution where it has no fields")
+    func emptyMergedPartGetsSentinel() throws {
+        let fixture = try MultiDistroFixture(MultiDistroFixture.shifting)
+        defer { fixture.remove() }
+        let source = try #require(try fixture.generate()["FixtureMsgs/ShiftAction.swift"])
+        // The goal has no fields on Lyrical and the feedback none on Jazzy; each writes and reads
+        // the placeholder byte at its end, there only.
+        let indent = "            "
+        // The end of the `if`, then of `encode(to:)` or `init(from:)`.
+        let end = "\n\(indent)}\n        }\n"
+        for (name, condition) in [("Goal", "schemaDistro >= .lyrical"), ("Feedback", "schemaDistro < .lyrical")] {
+            let part = try Self.part(name, in: source)
+            let write = "\(indent)if encoder.\(condition) {\n\(indent)    encoder.writeUInt8(0)\(end)"
+            let read = "\(indent)if decoder.\(condition) {\n\(indent)    _ = try decoder.readUInt8()\(end)"
+            #expect(part.contains(write), "\(name)")
+            #expect(part.contains(read), "\(name)")
+        }
+        #expect(!(try Self.part("Result", in: source)).contains("UInt8"))
+
+        // Each distribution has the hashes of its own `.action`, in which the part is empty.
+        for (distro, files) in MultiDistroFixture.shifting {
+            let single = try MultiDistroFixture([distro: files])
+            defer { single.remove() }
+            let own = try Self.hashes(single.runs, distro)
+            #expect(own.count == 13)
+            #expect(try Self.hashes(fixture.runs, distro) == own, "\(distro)")
+        }
+    }
+
+    @Test("the CDR tests compile the generated Shift action")
+    func cdrShiftFixtureIsGenerated() throws {
+        let fixture = try MultiDistroFixture(MultiDistroFixture.shifting)
+        defer { fixture.remove() }
+        let generated = try #require(try fixture.generate()["FixtureMsgs/ShiftAction.swift"])
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("SwiftROS2CDRTests/Fixtures/ShiftAction.swift")
+        #expect(try String(contentsOf: url, encoding: .utf8) == generated)
     }
 
     @Test("a part field that changes type is reported at its line, with each distribution's type")
@@ -220,9 +264,10 @@ struct ActionMergeTests {
         ]
     }()
 
-    /// The `Resources/IDL` file at `path`.
-    static func resource(_ path: String) throws -> String {
-        let url = try #require(Bundle.module.url(forResource: "Resources/IDL/\(path)", withExtension: nil))
+    /// The `.msg` file of `name` in the `Resources/IDL` package directory `package`.
+    static func resource(_ package: String, _ name: String) throws -> String {
+        let url = try #require(
+            Bundle.module.url(forResource: name, withExtension: "msg", subdirectory: "Resources/IDL/\(package)/msg"))
         return try String(contentsOf: url, encoding: .utf8)
     }
 
@@ -231,12 +276,12 @@ struct ActionMergeTests {
     static func navigateToPoseFixture() throws -> MultiDistroFixture {
         let distros = ["humble", "jazzy", "kilted", "lyrical"]
         let std = [
-            "msg/Header.msg": try resource("std_msgs_with_header/msg/Header.msg"),
-            "msg/Empty.msg": try resource("std_msgs_primitives/msg/Empty.msg"),
+            "msg/Header.msg": try resource("std_msgs_with_header", "Header"),
+            "msg/Empty.msg": try resource("std_msgs_primitives", "Empty"),
         ]
         var geometry: [String: String] = [:]
         for name in ["PoseStamped", "Pose", "Point", "Quaternion"] {
-            geometry["msg/\(name).msg"] = try resource("geometry_msgs/msg/\(name).msg")
+            geometry["msg/\(name).msg"] = try resource("geometry_msgs", name)
         }
         return try MultiDistroFixture(packages: [
             "nav2_msgs": Dictionary(

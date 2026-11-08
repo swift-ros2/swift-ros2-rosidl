@@ -95,6 +95,14 @@ struct MultiDistroFixture {
         ]
     }()
 
+    /// `fixture_msgs/action/Shift` on Jazzy and Lyrical, two of whose parts have no fields in
+    /// one of them: the goal has `int32 order` on Jazzy and no fields on Lyrical, the feedback no
+    /// fields on Jazzy and `float32 x` on Lyrical. The result is `int32 code` on both.
+    static let shifting: [String: [String: String]] = [
+        "jazzy": ["action/Shift.action": "int32 order\n---\nint32 code\n---\n"],
+        "lyrical": ["action/Shift.action": "---\nint32 code\n---\nfloat32 x\n"],
+    ]
+
     /// `fixture_msgs/msg/Grow`: `int32 old` on Humble, no fields on Jazzy and Kilted, and
     /// `float64 x` on Lyrical.
     static let growing: [String: [String: String]] = [

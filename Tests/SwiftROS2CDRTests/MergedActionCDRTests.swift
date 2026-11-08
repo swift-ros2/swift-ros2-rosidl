@@ -2,6 +2,7 @@ import Foundation
 import SwiftROS2CDR
 import SwiftROS2Messages
 import Testing
+import UniqueIdentifierMsgs
 
 /// Wire bytes and hashes of an action whose `.action` differs between distributions, using
 /// `Fixtures/MergeAction.swift` and `Fixtures/EmptyMsg.swift`: the generator's output for
@@ -11,6 +12,10 @@ import Testing
 /// Humble's result is `std_msgs/Empty result` and later results are `uint16 error_code` and
 /// `string error_msg`; Kilted adds the goal's `string behavior` and Lyrical the feedback's
 /// `float32 tracking_error`.
+///
+/// `Fixtures/ShiftAction.swift`, `fixture_msgs/action/Shift` read for Jazzy and Lyrical, has
+/// parts without fields in one distribution: the goal is `int32 order` on Jazzy and empty on
+/// Lyrical, the feedback empty on Jazzy and `float32 x` on Lyrical.
 @Suite("An action that differs between distributions")
 struct MergedActionCDRTests {
     private let header: [UInt8] = [0x00, 0x01, 0x00, 0x00]
@@ -75,6 +80,34 @@ struct MergedActionCDRTests {
             let decoded = try decode(MergeAction.Feedback.self, bytes, distro)
             #expect(decoded == (distro >= .lyrical ? value : MergeAction.Feedback(progress: 0.5)), "\(distro)")
         }
+    }
+
+    @Test("a part is rosidl's placeholder byte in a distribution where it has no fields")
+    func emptyPartPlaceholder() throws {
+        let goal = ShiftAction.Goal(order: 7)
+        let feedback = ShiftAction.Feedback(x: 1.5)
+        for distro in ROS2Distro.allCases {
+            // Humble and Kilted, not read, have Jazzy's layout; Rolling has Lyrical's.
+            let lyrical = distro >= .lyrical
+            let goalBytes = header + (lyrical ? [0x00] : [0x07, 0x00, 0x00, 0x00])
+            #expect(try encode(goal, distro) == goalBytes, "\(distro)")
+            let decodedGoal = try decode(ShiftAction.Goal.self, goalBytes, distro)
+            #expect(decodedGoal == (lyrical ? ShiftAction.Goal() : goal), "\(distro)")
+            // 1.5 as a little-endian float32.
+            let feedbackBytes = header + (lyrical ? [0x00, 0x00, 0xC0, 0x3F] : [0x00])
+            #expect(try encode(feedback, distro) == feedbackBytes, "\(distro)")
+            let decodedFeedback = try decode(ShiftAction.Feedback.self, feedbackBytes, distro)
+            #expect(decodedFeedback == (lyrical ? feedback : ShiftAction.Feedback()), "\(distro)")
+        }
+        // The wrappers carry the byte of the part they hold.
+        let uuid = (1...16).map { UInt8($0) }
+        let request = Shift_SendGoal_Request(goalId: UniqueIdentifierUUID(uuid: uuid), goal: goal)
+        #expect(try encode(request, .lyrical) == header + uuid + [0x00])
+        #expect(try decode(Shift_SendGoal_Request.self, header + uuid + [0x00], .lyrical).goal == ShiftAction.Goal())
+        let message = Shift_FeedbackMessage(goalId: UniqueIdentifierUUID(uuid: uuid), feedback: feedback)
+        #expect(try encode(message, .jazzy) == header + uuid + [0x00])
+        #expect(
+            try decode(Shift_FeedbackMessage.self, header + uuid + [0x00], .jazzy).feedback == ShiftAction.Feedback())
     }
 
     /// `A.typeInfo(for:)` through the protocol, as swift-ros2 calls it.
