@@ -256,6 +256,47 @@ extension IRBuilder {
         )
     }
 
+    /// Build one ``ActionIR`` from the `.action` of each distribution that has it.
+    ///
+    /// The goal, the result and the feedback are each merged like a message
+    /// (``build(perDistro:kind:)``): a field that only some distributions have is
+    /// distro-conditional, and the constants are the union. The five wrappers reference the
+    /// three parts by name only, so they are the same for every distribution; each
+    /// distribution's wrapper, service and action hashes come from projecting the merged parts
+    /// onto it (``populateActionHashes(_:distro:extraRegistry:)``), as for an action whose parts
+    /// hold a merged message.
+    ///
+    /// - Throws: ``IRMergeError`` when a field of a part changes type between distributions,
+    ///   and ``IRBuildError`` when a part has an invalid default or constant or when two
+    ///   distributions have the shared fields of a part in a different order.
+    public static func build(perDistro actions: [String: IDLAction]) throws -> ActionIR {
+        precondition(!actions.isEmpty, "IRBuilder.build(perDistro:) needs at least one action")
+        let oldest = distroOrder.first { actions[$0] != nil } ?? actions.keys.sorted()[0]
+        let identity = actions[oldest]!
+        let goal = try build(perDistro: actions.mapValues(\.goal), kind: .action)
+        let result = try build(perDistro: actions.mapValues(\.result), kind: .action)
+        let feedback = try build(perDistro: actions.mapValues(\.feedback), kind: .action)
+        let wrappers = synthesizeActionWrappers(
+            actionPackage: identity.package,
+            actionTypeName: identity.typeName,
+            goalFields: goal.fields,
+            resultFields: result.fields,
+            feedbackFields: feedback.fields
+        )
+        return ActionIR(
+            package: identity.package,
+            typeName: identity.typeName,
+            goal: goal,
+            result: result,
+            feedback: feedback,
+            sendGoalRequest: wrappers.sendGoalRequest,
+            sendGoalResponse: wrappers.sendGoalResponse,
+            getResultRequest: wrappers.getResultRequest,
+            getResultResponse: wrappers.getResultResponse,
+            feedbackMessage: wrappers.feedbackMessage
+        )
+    }
+
     /// Synthesize the five wire-level wrapper ``MessageIR``s per the rcl action
     /// protocol, with the field shapes of the rosidl-generated wrappers.
     static func synthesizeActionWrappers(

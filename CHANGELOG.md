@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- Actions whose `.action` differs between distributions, such as
+  `nav2_msgs/action/NavigateToPose`; they were rejected. Their goal, result and feedback are
+  merged like messages: a field that only some distributions have is written and read only for
+  them, and the constants are those of every distribution. The five wrappers are shared, and
+  `typeInfo(for:)` returns each distribution's hashes of the parts, the wrappers and the
+  SendGoal and GetResult services, as rosidl computes them from that distribution's `.action`.
+  New `IRBuilder.build(perDistro:)` overload for `[String: IDLAction]`.
+
+### Changed
+
+- An action whose goal, result or feedback field changes type between distributions is
+  reported at that field's line in the `.action` of the first distribution that changes it,
+  with the type of every distribution (`action 'J' cannot be merged across distributions: goal
+  field 'g' changes type: int32 in [jazzy], int64 in [lyrical]`). A `.srv` that differs between
+  distributions is still rejected.
+
 ### Fixed
 
 - A generated action has the constants of its goal, result and feedback (for example

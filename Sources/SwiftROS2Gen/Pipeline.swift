@@ -249,12 +249,10 @@ extension Pipeline {
                             topLevelTypeName: entry.ir.typeName, distros: entry.distros))
                 }
             }
-            // Services and actions are the union across the package's runs, each with the
-            // distributions whose IDL has it. Multi-distro merging is intentionally unsupported
-            // for them: one whose shape differs between distros is rejected, so we never
-            // silently emit one distro's shape.
-            let services = try unionAcrossDistros(
-                pkgRuns, kind: .srv, parse: parseServicesIn, typeName: \.typeName)
+            // Services are the union across the package's runs, each with the distributions
+            // whose IDL has it. Multi-distro merging is unsupported for them: one whose shape
+            // differs between distros is rejected, so we never silently emit one distro's shape.
+            let services = try unionServicesAcrossDistros(pkgRuns)
             for (svc, distros) in services {
                 let label = sourceLabel(package: svc.package, typeName: svc.typeName, kind: .srv)
                 for half in [svc.requestIDL, svc.responseIDL] {
@@ -267,10 +265,15 @@ extension Pipeline {
             }
             collectedServices.append(contentsOf: services.map(\.item))
 
-            let actions = try unionAcrossDistros(
-                pkgRuns, kind: .action, parse: parseActionsIn, typeName: \.typeName)
+            // Actions are the union across the package's runs too. One whose `.action` differs
+            // between distros has its goal, result and feedback merged like messages.
+            let actions = try mergeActionsAcrossDistros(pkgRuns)
             for (act, distros) in actions {
                 let label = sourceLabel(package: act.package, typeName: act.typeName, kind: .action)
+                for part in [act.actionIR.goal, act.actionIR.result, act.actionIR.feedback]
+                where !part.perDistroFieldPresence.isEmpty {
+                    try validateDistroAvailability(part, readDistros: distros)
+                }
                 // The user-defined Goal/Result/Feedback IRs go in the registry so wrapper
                 // nested references resolve; the wrappers so the action-level hash and any
                 // cross-package reference to a wrapper resolves.
@@ -320,32 +323,28 @@ extension Pipeline {
             dependencyPackages: dependencyPackages)
     }
 
-    /// The services or actions of every run of one package, in first-seen order, each with the
+    /// The services of every run of one package, in first-seen order, each with the
     /// distributions whose IDL has it. Throws when one differs between distributions.
-    private static func unionAcrossDistros<Item: Equatable>(
-        _ runs: [PackageRun],
-        kind: MessageKind,
-        parse: (PackageRun) throws -> [Item],
-        typeName: (Item) -> String
-    ) throws -> [(item: Item, distros: Set<String>)] {
-        var union: [(item: Item, distros: Set<String>)] = []
+    private static func unionServicesAcrossDistros(
+        _ runs: [PackageRun]
+    ) throws -> [(item: ParsedService, distros: Set<String>)] {
+        var union: [(item: ParsedService, distros: Set<String>)] = []
         var indexByName: [String: Int] = [:]
         for run in runs {
-            for item in try parse(run) {
-                let name = typeName(item)
+            for item in try parseServicesIn(run: run) {
+                let name = item.typeName
                 guard let index = indexByName[name] else {
                     indexByName[name] = union.count
                     union.append((item, [run.input.distro]))
                     continue
                 }
                 guard union[index].item == item else {
-                    let noun = kind == .srv ? "service" : "action"
                     throw GeneratorError.parse(
                         ParseError(
-                            file: "\(run.input.name)/\(kind.rawValue)/\(name).\(kind.rawValue)",
+                            file: sourceLabel(package: run.input.name, typeName: name, kind: .srv),
                             line: 1,
                             message:
-                                "\(noun) '\(name)' differs between distros — multi-distro \(noun) merging is not supported"
+                                "service '\(name)' differs between distros — multi-distro service merging is not supported"
                         ))
                 }
                 union[index].distros.insert(run.input.distro)
@@ -362,7 +361,8 @@ extension Pipeline {
     /// When two `runs` share the same `input.name` (typically because
     /// the caller passed both a Humble and a Jazzy directory for the same
     /// package), the per-distro IDL files for each type are merged via
-    /// ``IRBuilder/build(perDistro:)`` into a single distro-conditional IR.
+    /// ``IRBuilder/build(perDistro:kind:)`` into a single distro-conditional IR (an action's
+    /// via ``IRBuilder/build(perDistro:)`` when its `.action` differs between them).
     /// `unresolvedIRs` then carries one merged IR per `(package, typeName)`
     /// even though the source IDLs come from multiple distros.
     public static func generateMulti(
@@ -925,7 +925,7 @@ extension Pipeline {
     }
 
     /// Parses the `.msg` files of every run of one package (one run per distribution) and merges
-    /// the per-distribution IDL of each type with ``IRBuilder/build(perDistro:)`` into one
+    /// the per-distribution IDL of each type with ``IRBuilder/build(perDistro:kind:)`` into one
     /// distro-conditional IR. `pkgRuns` all share one package name; ``collect(_:)`` groups them.
     private static func parseAndMergeMultiDistroPackage(
         runs pkgRuns: [PackageRun]
@@ -1029,6 +1029,19 @@ extension Pipeline {
     /// ``GeneratorError/packageDirectoryMissing(_:)``. The type allow-list matches the bare
     /// action name (`Fibonacci`).
     public static func parseActionsIn(run: PackageRun) throws -> [ParsedAction] {
+        try parseActionSources(of: run).map(\.action)
+    }
+
+    /// One `.action` file of a run: its location, its parsed IDL and the action built from it.
+    private struct ActionSource {
+        let path: String
+        let idl: IDLAction
+        let action: ParsedAction
+    }
+
+    /// The `.action` files of one run, each parsed and built on its own, so that an invalid
+    /// default or constant is reported with the file and line it comes from.
+    private static func parseActionSources(of run: PackageRun) throws -> [ActionSource] {
         try idlSources(of: run, kind: .action, allowList: run.typesAllowList).map { source in
             let idl = try parse {
                 try Parser.parseAction(
@@ -1036,7 +1049,99 @@ extension Pipeline {
                     typeName: source.typeName)
             }
             let ir = try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) }
-            return ParsedAction(package: run.input.name, typeName: source.typeName, actionIR: ir)
+            return ActionSource(
+                path: source.url.path, idl: idl,
+                action: ParsedAction(package: run.input.name, typeName: source.typeName, actionIR: ir))
+        }
+    }
+
+    /// The actions of every run of one package, in first-seen order, each with the distributions
+    /// whose IDL has it. An action whose `.action` builds the same in every distribution that has
+    /// it is the action of the oldest of them, exactly as from a single distribution. One that
+    /// differs is merged with ``IRBuilder/build(perDistro:)``: its goal, result and feedback are
+    /// merged like messages, so a field only some distributions have is distro-conditional.
+    ///
+    /// - Throws: ``GeneratorError/parse(_:)`` naming the `.action` file and the distributions
+    ///   when a field of the goal, result or feedback changes type between distributions or
+    ///   when two distributions have shared fields in a different order.
+    static func mergeActionsAcrossDistros(
+        _ runs: [PackageRun]
+    ) throws -> [(item: ParsedAction, distros: Set<String>)] {
+        var sourcesByName: [String: [String: ActionSource]] = [:]
+        var order: [String] = []
+        for run in runs {
+            for source in try parseActionSources(of: run) {
+                let name = source.action.typeName
+                if sourcesByName[name] == nil { order.append(name) }
+                sourcesByName[name, default: [:]][run.input.distro] = source
+            }
+        }
+        return try order.map { name in
+            let sources = sourcesByName[name]!
+            let distros = Set(sources.keys)
+            let oldest = sources[IRBuilder.distroOrder.first { sources[$0] != nil } ?? sources.keys.sorted()[0]]!
+            if sources.values.allSatisfy({ $0.action == oldest.action }) {
+                return (oldest.action, distros)
+            }
+            let package = oldest.action.package
+            let label = sourceLabel(package: package, typeName: name, kind: .action)
+            do {
+                let merged = try buildIR(file: label) { try IRBuilder.build(perDistro: sources.mapValues(\.idl)) }
+                return (ParsedAction(package: package, typeName: name, actionIR: merged), distros)
+            } catch let error as IRMergeError {
+                throw actionMergeError(error, action: oldest.idl, sources: sources, label: label)
+            }
+        }
+    }
+
+    /// The error for an action whose goal, result or feedback cannot be merged. A field that
+    /// changes type is reported at its line in the `.action` of the first distribution that
+    /// changes it, with the type of every distribution that has it.
+    private static func actionMergeError(
+        _ error: IRMergeError, action: IDLAction, sources: [String: ActionSource], label: String
+    ) -> GeneratorError {
+        let message = "action '\(action.typeName)' cannot be merged across distributions"
+        let parts: [(name: String, idl: (IDLAction) -> IDLFile)] = [
+            ("goal", \.goal), ("result", \.result), ("feedback", \.feedback),
+        ]
+        guard case .conflictingFieldType(let field, let perDistroTypes) = error.kind,
+            let part = parts.first(where: { error.typeName == "\(action.package)/\($0.idl(action).typeName)" })
+        else {
+            return .parse(ParseError(file: label, line: 1, message: "\(message): \(error)"))
+        }
+        // The distributions that have the field, grouped by its type in order of appearance.
+        var groups: [(type: FieldType, distros: [String])] = []
+        for distro in IRBuilder.distroOrder {
+            guard let type = perDistroTypes[distro] else { continue }
+            if let i = groups.firstIndex(where: { $0.type == type }) {
+                groups[i].distros.append(distro)
+            } else {
+                groups.append((type, [distro]))
+            }
+        }
+        let changed = groups.count > 1 ? groups[1].distros[0] : groups[0].distros[0]
+        let source = sources[changed]!
+        let line = part.idl(source.idl).fields.first { $0.name == field }?.sourceLine ?? 1
+        let types = groups.map { "\(idlName($0.type)) in [\($0.distros.joined(separator: ", "))]" }
+        return .parse(
+            ParseError(
+                file: source.path, line: line,
+                message: "\(message): \(part.name) field '\(field)' changes type: \(types.joined(separator: ", "))"))
+    }
+
+    /// `type` as an IDL file writes it: `int32`, `string<=8`, `geometry_msgs/Pose[3]`.
+    private static func idlName(_ type: FieldType) -> String {
+        switch type {
+        case .primitive(let primitive):
+            return primitive.rawValue
+        case .nested(let package, let typeName):
+            return "\(package)/\(typeName)"
+        case .array(let element, let length):
+            return "\(idlName(element))[\(length)]"
+        case .sequence(let element, let upperBound):
+            return "\(idlName(element))[\(upperBound.map { "<=\($0)" } ?? "")]"
+        case .boundedString(let isWide, let upperBound):
+            return "\(isWide ? "wstring" : "string")<=\(upperBound)"
         }
     }
 }
