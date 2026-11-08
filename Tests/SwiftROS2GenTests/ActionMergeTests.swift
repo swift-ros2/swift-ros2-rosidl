@@ -203,23 +203,23 @@ struct ActionMergeTests {
         }
     }
 
-    @Test("a part whose shared fields change order is reported with the action and the distributions")
+    @Test("a part whose shared fields change order is reported at the first of them in the later distribution")
     func reorderedPartFieldsAreRejected() throws {
         let fixture = try MultiDistroFixture([
             "jazzy": ["action/J.action": "int32 a\nint32 b\n---\n---\n"],
-            "lyrical": ["action/J.action": "int32 b\nint32 a\n---\n---\n"],
+            "lyrical": ["action/J.action": "# swapped\nint32 b\nint32 a\n---\n---\n"],
         ])
         defer { fixture.remove() }
         #expect {
             try fixture.generate()
         } throws: { error in
-            "\(error)"
-                == "fixture_msgs/action/J.action:1: fixture_msgs/action/J_Goal: "
-                + "fields 'a', 'b' are in a different order in lyrical than in jazzy"
+            "\(error)".hasSuffix(
+                "/lyrical/fixture_msgs/action/J.action:2: action 'J' cannot be merged across distributions: "
+                    + "goal fields 'a', 'b' are in a different order in lyrical than in jazzy")
         }
     }
 
-    @Test("a part field that skips a distribution is rejected")
+    @Test("a part field that skips a distribution is reported where it comes back")
     func actionFieldGapIsRejected() throws {
         let action = ["int32 g\n---\nint32 r\nint32 extra\n---\nint32 f\n", "int32 g\n---\nint32 r\n---\nint32 f\n"]
         let fixture = try MultiDistroFixture([
@@ -230,8 +230,10 @@ struct ActionMergeTests {
         #expect {
             try fixture.generate()
         } throws: { error in
-            "\(error)".hasPrefix(
-                "fixture_msgs/action/Gap_Result: field 'extra' exists in [jazzy, lyrical] but not in [kilted]")
+            "\(error)".hasSuffix(
+                "/lyrical/fixture_msgs/action/Gap.action:4: action 'Gap' cannot be merged across distributions: "
+                    + "result field 'extra' exists in [jazzy, lyrical] but not in [kilted] between them — a field "
+                    + "must exist in one contiguous run of distributions")
         }
     }
 

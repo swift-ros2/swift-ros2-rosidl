@@ -230,30 +230,11 @@ extension IRBuilder {
     ///
     /// - Throws: ``IRBuildError`` when a block has an invalid default or constant.
     public static func build(jazzy idl: IDLAction) throws -> ActionIR {
-        let goal = try build(jazzy: idl.goal, kind: .action)
-        let result = try build(jazzy: idl.result, kind: .action)
-        let feedback = try build(jazzy: idl.feedback, kind: .action)
-
-        let wrappers = synthesizeActionWrappers(
-            actionPackage: idl.package,
-            actionTypeName: idl.typeName,
-            goalFields: goal.fields,
-            resultFields: result.fields,
-            feedbackFields: feedback.fields
-        )
-
-        return ActionIR(
-            package: idl.package,
-            typeName: idl.typeName,
-            goal: goal,
-            result: result,
-            feedback: feedback,
-            sendGoalRequest: wrappers.sendGoalRequest,
-            sendGoalResponse: wrappers.sendGoalResponse,
-            getResultRequest: wrappers.getResultRequest,
-            getResultResponse: wrappers.getResultResponse,
-            feedbackMessage: wrappers.feedbackMessage
-        )
+        action(
+            package: idl.package, typeName: idl.typeName,
+            goal: try build(jazzy: idl.goal, kind: .action),
+            result: try build(jazzy: idl.result, kind: .action),
+            feedback: try build(jazzy: idl.feedback, kind: .action))
     }
 
     /// Build one ``ActionIR`` from the `.action` of each distribution that has it.
@@ -271,21 +252,23 @@ extension IRBuilder {
     ///   distributions have the shared fields of a part in a different order.
     public static func build(perDistro actions: [String: IDLAction]) throws -> ActionIR {
         precondition(!actions.isEmpty, "IRBuilder.build(perDistro:) needs at least one action")
-        let oldest = oldestDistro(in: actions.keys)
-        let identity = actions[oldest]!
-        let goal = try build(perDistro: actions.mapValues(\.goal), kind: .action)
-        let result = try build(perDistro: actions.mapValues(\.result), kind: .action)
-        let feedback = try build(perDistro: actions.mapValues(\.feedback), kind: .action)
-        let wrappers = synthesizeActionWrappers(
-            actionPackage: identity.package,
-            actionTypeName: identity.typeName,
-            goalFields: goal.fields,
-            resultFields: result.fields,
-            feedbackFields: feedback.fields
-        )
+        let identity = actions[oldestDistro(in: actions.keys)]!
+        return action(
+            package: identity.package, typeName: identity.typeName,
+            goal: try build(perDistro: actions.mapValues(\.goal), kind: .action),
+            result: try build(perDistro: actions.mapValues(\.result), kind: .action),
+            feedback: try build(perDistro: actions.mapValues(\.feedback), kind: .action))
+    }
+
+    /// The action `<package>/action/<typeName>` with the given goal, result and feedback, and
+    /// the five wrappers synthesized for them (``synthesizeActionWrappers(actionPackage:actionTypeName:)``).
+    static func action(
+        package: String, typeName: String, goal: MessageIR, result: MessageIR, feedback: MessageIR
+    ) -> ActionIR {
+        let wrappers = synthesizeActionWrappers(actionPackage: package, actionTypeName: typeName)
         return ActionIR(
-            package: identity.package,
-            typeName: identity.typeName,
+            package: package,
+            typeName: typeName,
             goal: goal,
             result: result,
             feedback: feedback,
@@ -298,13 +281,11 @@ extension IRBuilder {
     }
 
     /// Synthesize the five wire-level wrapper ``MessageIR``s per the rcl action
-    /// protocol, with the field shapes of the rosidl-generated wrappers.
+    /// protocol, with the field shapes of the rosidl-generated wrappers. They reference the
+    /// goal, the result and the feedback by name only.
     static func synthesizeActionWrappers(
         actionPackage: String,
-        actionTypeName: String,
-        goalFields: [FieldIR],
-        resultFields: [FieldIR],
-        feedbackFields: [FieldIR]
+        actionTypeName: String
     ) -> (
         sendGoalRequest: MessageIR,
         sendGoalResponse: MessageIR,
@@ -378,8 +359,6 @@ extension IRBuilder {
             kind: .action,
             fields: [goalIdField, feedbackNestedField]
         )
-
-        _ = (goalFields, resultFields, feedbackFields)  // referenced via the nested wrappers above
 
         return (sendGoalRequest, sendGoalResponse, getResultRequest, getResultResponse, feedbackMessage)
     }
@@ -535,6 +514,16 @@ extension IRBuilder {
         perDistro idls: [String: IDLFile],
         kind: MessageKind = .msg
     ) throws -> MessageIR {
+        do {
+            return try merge(perDistro: idls, kind: kind)
+        } catch let error as FieldOrderError {
+            throw IRBuildError(error.description)
+        }
+    }
+
+    /// ``build(perDistro:kind:)``, throwing a ``FieldOrderError`` (which names the distribution
+    /// and the field) where it throws an ``IRBuildError`` for fields in a different order.
+    static func merge(perDistro idls: [String: IDLFile], kind: MessageKind) throws -> MessageIR {
         precondition(!idls.isEmpty, "IRBuilder.build(perDistro:) needs at least one IDL")
 
         // Validate identity (package/typeName) agreement across all input distros.
@@ -657,12 +646,35 @@ extension IRBuilder {
     /// order of their shared fields this is `firstSeen` with each added field moved to where
     /// its distro has it.
     ///
-    /// - Throws: ``IRBuildError`` when shared fields are in a different order in two distros.
+    /// - Throws: ``FieldOrderError`` when shared fields are in a different order in two distros.
     static func mergeFieldOrder(
         _ lists: [(distro: String, fields: [String])],
         firstSeen: [String],
         typeName: String
     ) throws -> [String] {
+        let merged = topologicalOrder(lists, firstSeen: firstSeen)
+        guard merged.count == firstSeen.count else {
+            throw reorderError(lists, firstSeen: firstSeen, typeName: typeName)
+        }
+        // Every distro reads the merged fields it has in its own order.
+        for list in lists {
+            let present = Set(list.fields)
+            let projected = merged.filter(present.contains)
+            guard projected == list.fields else {
+                throw FieldOrderError(
+                    typeName: typeName, distro: list.distro,
+                    field: zip(list.fields, projected).first { $0 != $1 }?.0 ?? list.fields[0],
+                    detail: "the merged field order does not match \(list.distro)")
+            }
+        }
+        return merged
+    }
+
+    /// The fields of `firstSeen` in the order ``mergeFieldOrder(_:firstSeen:typeName:)`` merges
+    /// them into, without the fields that no order fits (and the ones after them).
+    private static func topologicalOrder(
+        _ lists: some Collection<(distro: String, fields: [String])>, firstSeen: [String]
+    ) -> [String] {
         let rank = Dictionary(uniqueKeysWithValues: firstSeen.enumerated().map { ($1, $0) })
         var successors: [String: Set<String>] = [:]
         var predecessorCount: [String: Int] = Dictionary(uniqueKeysWithValues: firstSeen.map { ($0, 0) })
@@ -682,38 +694,58 @@ extension IRBuilder {
                 if predecessorCount[successor] == 0 { ready.insert(successor) }
             }
         }
-        guard merged.count == firstSeen.count else {
-            throw reorderError(lists, unordered: firstSeen.filter { !merged.contains($0) }, typeName: typeName)
-        }
-        // Every distro reads the merged fields it has in its own order.
-        for list in lists {
-            let present = Set(list.fields)
-            guard merged.filter(present.contains) == list.fields else {
-                throw IRBuildError("\(typeName): the merged field order does not match \(list.distro)")
-            }
-        }
         return merged
     }
 
     /// The error for distros whose shared fields cannot be put in one order: the first pair
-    /// of fields two distros order differently, or, when no two distros disagree directly,
-    /// the fields left unordered.
+    /// of fields two distros order differently, at the first of them in the later distro, or,
+    /// when no two distros disagree directly, the fields left unordered, at the first of them
+    /// in the oldest distro whose order cannot be merged with the older ones.
     private static func reorderError(
-        _ lists: [(distro: String, fields: [String])], unordered: [String], typeName: String
-    ) -> IRBuildError {
+        _ lists: [(distro: String, fields: [String])], firstSeen: [String], typeName: String
+    ) -> FieldOrderError {
         for (i, earlier) in lists.enumerated() {
             let position = Dictionary(uniqueKeysWithValues: earlier.fields.enumerated().map { ($1, $0) })
             for later in lists[(i + 1)...] {
                 let shared = later.fields.filter { position[$0] != nil }
                 for (a, b) in zip(shared, shared.dropFirst()) where position[a]! > position[b]! {
-                    return IRBuildError(
-                        "\(typeName): fields '\(b)', '\(a)' are in a different order in \(later.distro) than in \(earlier.distro)"
+                    return FieldOrderError(
+                        typeName: typeName, distro: later.distro, field: a,
+                        detail:
+                            "fields '\(b)', '\(a)' are in a different order in \(later.distro) than in \(earlier.distro)"
                     )
                 }
             }
         }
-        let names = unordered.map { "'\($0)'" }.joined(separator: ", ")
-        return IRBuildError(
-            "\(typeName): fields \(names) cannot be put in one order that matches every distribution")
+        let merged = topologicalOrder(lists, firstSeen: firstSeen)
+        let names = firstSeen.filter { !merged.contains($0) }.map { "'\($0)'" }.joined(separator: ", ")
+        // The first distro, in release order, whose order no longer fits with the older ones.
+        for end in lists.indices {
+            let fields = Set(lists[...end].flatMap(\.fields))
+            let fitting = Set(topologicalOrder(lists[...end], firstSeen: firstSeen.filter(fields.contains)))
+            if let field = lists[end].fields.first(where: { !fitting.contains($0) }) {
+                return FieldOrderError(
+                    typeName: typeName, distro: lists[end].distro, field: field,
+                    detail: "fields \(names) cannot be put in one order that matches every distribution")
+            }
+        }
+        preconditionFailure("IRBuilder.reorderError: every distro's field order fits")
     }
+}
+
+/// Fields of one type that no single order fits in every distribution: shared fields in a
+/// different order in two distributions. ``IRBuilder/build(perDistro:kind:)`` throws it as an
+/// ``IRBuildError`` with this description; the pipeline reports it at `field` in the IDL file
+/// of `distro`.
+struct FieldOrderError: Error, CustomStringConvertible {
+    /// The type, `<package>/<kind>/<Type>`.
+    let typeName: String
+    /// The distribution whose field order cannot be merged with an older one's.
+    let distro: String
+    /// The field of `distro` where its order departs.
+    let field: String
+    /// What is wrong, without the type name.
+    let detail: String
+
+    var description: String { "\(typeName): \(detail)" }
 }

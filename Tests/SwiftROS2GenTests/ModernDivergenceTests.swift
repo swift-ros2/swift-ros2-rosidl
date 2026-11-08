@@ -65,16 +65,18 @@ struct ModernDivergenceTests {
         #expect(sample.contains("        } else if distro >= .lyrical {\n"))
     }
 
-    @Test("a field missing only from a middle distribution is rejected")
+    @Test("a field missing only from a middle distribution is rejected where it comes back")
     func middleGapIsRejected() throws {
         #expect {
             try generate([
                 "jazzy": "float32 range\nfloat32 variance\n", "kilted": "float32 range\n",
-                "lyrical": "float32 range\nfloat32 variance\n",
+                "lyrical": "float32 range\n# back again\nfloat32 variance\n",
             ])
         } throws: { error in
-            "\(error)"
-                == "demo_msgs/msg/Sample: field 'variance' exists in [jazzy, lyrical] but not in [kilted] between them — a field must exist in one contiguous run of distributions"
+            "\(error)".hasSuffix(
+                "/lyrical/demo_msgs/msg/Sample.msg:3: message 'Sample' cannot be merged across distributions: "
+                    + "field 'variance' exists in [jazzy, lyrical] but not in [kilted] between them — a field must "
+                    + "exist in one contiguous run of distributions")
         }
     }
 

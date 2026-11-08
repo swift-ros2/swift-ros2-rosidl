@@ -19,6 +19,16 @@
   with the type of every distribution (`action 'J' cannot be merged across distributions: goal
   field 'g' changes type: int32 in [jazzy], int64 in [lyrical]`). A `.srv` that differs between
   distributions is still rejected.
+- Messages, services and actions are merged across distributions on one path, and every type
+  that cannot be merged is reported in the format above: at the line of the `.msg`, `.srv` or
+  `.action` of the distribution that introduces the problem, with the type, its part and, for a
+  field that changes type, its type in every distribution. This covers a message field that
+  changes type (a bare `IRMergeError` that named no file), shared fields in a different order,
+  a field that skips a distribution (`GeneratorError.modernDistroDivergence`, which the pipeline
+  no longer throws), and a `.srv` that differs between distributions, which is still rejected
+  (`service 'S' cannot be merged across distributions: response differs in lyrical from jazzy`).
+  A `.srv` whose files differ only in comments or layout is no longer rejected, and an invalid
+  default or constant in a `.srv` names the file's path, as in a `.msg` or `.action`.
 
 ### Fixed
 

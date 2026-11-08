@@ -155,7 +155,8 @@ struct SwiftROS2GenCommand: ParsableCommand {
                 oracleSamples = try Pipeline.generateOracleSamples(runs, moduleNames: moduleNames)
             }
         } catch {
-            // GeneratorError, and IRMergeError when distributions cannot be merged.
+            // GeneratorError; a type that cannot be merged across distributions is a
+            // GeneratorError.parse at the file and line of the distribution that introduces it.
             FileHandle.standardError.write(Data("error: \(error)\n".utf8))
             throw ExitCode.failure
         }
