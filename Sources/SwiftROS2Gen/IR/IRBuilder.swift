@@ -514,10 +514,11 @@ extension IRBuilder {
         var fieldOrder: [String] = []
         var fieldListPerDistro: [(distro: String, fields: [String])] = []
         var fieldTypeByName: [String: FieldType] = [:]
+        // Each distro's type of each field, to report a type change.
+        var fieldTypesPerDistro: [String: [String: FieldType]] = [:]
         // Carry through the field-level metadata (default, swiftName) of the
         // latest distro that declared the field; newer distros win.
         var latestFieldByName: [String: (default: DefaultValue?, swiftName: String)] = [:]
-        var fieldTypeConflict: [String: [String: FieldType]] = [:]
         var presenceByName: [String: Set<String>] = [:]
         var presencePerDistro: [String: Set<String>] = [:]
 
@@ -528,20 +529,8 @@ extension IRBuilder {
             for f in idl.fields {
                 let irType = lift(f.type, currentPackage: idl.package)
                 if thisDistroPresence.insert(f.name).inserted { thisDistroFields.append(f.name) }
-                if let existing = fieldTypeByName[f.name] {
-                    if existing != irType {
-                        var bucket = fieldTypeConflict[f.name] ?? [:]
-                        // Backfill the canonical type for already-walked distros that had it.
-                        for prior in orderedDistros {
-                            if prior == distro { break }
-                            if presenceByName[f.name]?.contains(prior) == true {
-                                bucket[prior] = existing
-                            }
-                        }
-                        bucket[distro] = irType
-                        fieldTypeConflict[f.name] = bucket
-                    }
-                } else {
+                fieldTypesPerDistro[f.name, default: [:]][distro] = irType
+                if fieldTypeByName[f.name] == nil {
                     fieldTypeByName[f.name] = irType
                     fieldOrder.append(f.name)
                 }
@@ -555,9 +544,12 @@ extension IRBuilder {
             fieldListPerDistro.append((distro, thisDistroFields))
         }
 
-        if let (name, perDistroTypes) = fieldTypeConflict.first {
+        // The first field whose type changes, with the type of every distro that has it.
+        if let name = fieldOrder.first(where: { name in
+            fieldTypesPerDistro[name]!.values.contains { $0 != fieldTypeByName[name]! }
+        }) {
             throw IRMergeError(
-                kind: .conflictingFieldType(name: name, perDistroTypes: perDistroTypes),
+                kind: .conflictingFieldType(name: name, perDistroTypes: fieldTypesPerDistro[name]!),
                 typeName: "\(canonicalPackage)/\(canonicalType)"
             )
         }

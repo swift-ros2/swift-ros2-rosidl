@@ -80,6 +80,20 @@ struct IRBuilderMergeTests {
         }
     }
 
+    @Test("a type change reports the type of every distro that has the field")
+    func typeChangeReportsEveryDistro() {
+        let types: [String: PrimitiveType] = ["humble": .int32, "jazzy": .int64, "kilted": .int64, "lyrical": .int32]
+        let idls = types.mapValues { makeIDL(package: "demo_msgs", typeName: "Foo", primitives: [("payload", $0)]) }
+        #expect {
+            try IRBuilder.build(perDistro: idls)
+        } throws: { error in
+            guard let error = error as? IRMergeError,
+                case .conflictingFieldType(let name, let perDistroTypes) = error.kind
+            else { return false }
+            return name == "payload" && perDistroTypes == types.mapValues { .primitive($0) }
+        }
+    }
+
     @Test("fields reordered between distros are rejected")
     func reorderedFieldsAreRejected() {
         let humble = makeIDL(
