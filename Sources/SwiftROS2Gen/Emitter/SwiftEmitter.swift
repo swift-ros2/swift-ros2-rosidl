@@ -50,19 +50,29 @@ public enum SwiftEmitter {
 
     /// Emit a single `public struct …` declaration for `ir` without the file
     /// header / imports. Used by both the top-level message emit (which
-    /// prefixes its own header) and the action emit (which composes multiple
-    /// wrapper structs into one file).
+    /// prefixes its own header) and the action emit (which composes the goal,
+    /// result and feedback structs and the wrapper structs into one file).
+    ///
+    /// - Parameters:
+    ///   - typeDoc: whether the struct starts with a `/// <ROS type name>` line.
+    ///   - indent: prefixed to every non-empty line, for a struct declared inside another
+    ///     declaration (an action's `Goal`, `Result` and `Feedback`, inside its
+    ///     `<Name>Action` enum).
     static func emitMessageStruct(
         _ ir: MessageIR,
         isNested: Bool,
         structNameOverride: String?,
-        nestedNameOverrides: [String: String]
+        nestedNameOverrides: [String: String],
+        typeDoc: Bool = true,
+        indent: String = ""
     ) -> String {
         let conditional = !isNested && isConditional(ir)
         let read = readDistros(ir)
         let ladder = isNested ? [] : modernLadder(ir.perDistroHashes, read: Set(ir.perDistroFieldPresence.keys))
         var out = ""
-        out += "/// \(ir.rosTypeName)\n"
+        if typeDoc {
+            out += "/// \(ir.rosTypeName)\n"
+        }
         let structName = structNameOverride ?? swiftStructName(typeName: ir.typeName)
         let conformance =
             isNested ? "CDRCodable, Equatable, Sendable" : "ROS2Message, Equatable, Sendable"
@@ -133,7 +143,9 @@ public enum SwiftEmitter {
                 if let comment = boundedComment(field.type) {
                     out += "    \(comment)\n"
                 }
-                out += availabilityDoc(field, read: read, nestedNameOverrides: nestedNameOverrides, indent: "    ")
+                out += availabilityDoc(
+                    field, read: read, nestedNameOverrides: nestedNameOverrides, indent: "    ",
+                    width: 120 - indent.count)
                 let typeName = swiftType(field.type, nestedNameOverrides: nestedNameOverrides)
                 out += "    public var \(field.swiftName): \(typeName)\n"
             }
@@ -182,7 +194,7 @@ public enum SwiftEmitter {
             out += "    }\n"
         }
         out += "}\n"
-        return out
+        return reindent(out, by: indent)
     }
 
     /// Render a `ROS2ServiceType` umbrella enum that ties the previously-emitted
@@ -339,8 +351,9 @@ public enum SwiftEmitter {
     ///    that conform to ``ROS2Message`` — these are the wire types that
     ///    publishers / subscribers actually exchange.
     ///
-    /// The five wrappers are emitted via ``emit(_:sourceLabel:isNested:structNameOverride:nestedNameOverrides:)``
-    /// so per-wrapper bodies share the message emitter's logic. Cross-wrapper
+    /// The three parts and the five wrappers are emitted by the message struct
+    /// emitter (`emitMessageStruct`), so their bodies are those of a `.msg`-derived
+    /// struct: constants, fields and codec. Cross-wrapper
     /// references to the inner Goal/Result/Feedback structs are routed through
     /// `nestedNameOverrides` (e.g.
     /// `example_interfaces/action/Fibonacci_Goal -> FibonacciAction.Goal`).
@@ -395,18 +408,20 @@ public enum SwiftEmitter {
             out += actionInfoArguments(ir, hashes: hashes, indent: "        ")
             out += "    )\n"
         }
-        out += "\n"
-        out += emitActionInnerStruct(
-            name: "Goal", fields: ir.goal.fields,
-            indent: "    ", nestedNameOverrides: overrides)
-        out += "\n"
-        out += emitActionInnerStruct(
-            name: "Result", fields: ir.result.fields,
-            indent: "    ", nestedNameOverrides: overrides)
-        out += "\n"
-        out += emitActionInnerStruct(
-            name: "Feedback", fields: ir.feedback.fields,
-            indent: "    ", nestedNameOverrides: overrides)
+        // The goal, result and feedback, nested in the enum. Like any other `CDRCodable`
+        // body, their `encode(to:)` writes only the message body: they are never published
+        // directly, only inside the wrappers.
+        for (name, part) in [("Goal", ir.goal), ("Result", ir.result), ("Feedback", ir.feedback)] {
+            out += "\n"
+            out += emitMessageStruct(
+                part,
+                isNested: true,
+                structNameOverride: name,
+                nestedNameOverrides: overrides,
+                typeDoc: false,
+                indent: "    "
+            )
+        }
         out += "}\n"
         out += "\n"
 
@@ -448,85 +463,7 @@ public enum SwiftEmitter {
         ].map { "\(indent)\($0)\n" }.joined()
     }
 
-    /// Emit a `Goal` / `Result` / `Feedback` inner struct (CDRCodable, no
-    /// `ROS2Message` conformance — like any other ``CDRCodable`` body, the
-    /// generated `encode(to:)` writes only the message body; the CDR
-    /// encapsulation header is prepended by the caller (the publish path)
-    /// and these inner payloads are never published directly).
-    static func emitActionInnerStruct(
-        name: String,
-        fields: [FieldIR],
-        indent: String,
-        nestedNameOverrides: [String: String]
-    ) -> String {
-        var out = ""
-        out += "\(indent)public struct \(name): CDRCodable, Equatable, Sendable {\n"
-        if fields.isEmpty {
-            // rosidl gives an empty goal / result / feedback the same implicit
-            // `uint8 structure_needs_at_least_one_member` as any other empty
-            // structure (see ``emitMessageStruct``) and serializes it, so the
-            // codec writes and reads one 0x00 body byte here too.
-            out += "\(indent)    public init() {}\n"
-            out += "\n"
-            out += "\(indent)    public func encode(to encoder: CDREncoder) throws {\n"
-            out += "\(indent)        encoder.writeUInt8(0)\n"
-            out += "\(indent)    }\n"
-            out += "\n"
-            out += "\(indent)    public init(from decoder: CDRDecoder) throws {\n"
-            out += "\(indent)        _ = try decoder.readUInt8()\n"
-            out += "\(indent)    }\n"
-        } else {
-            for field in fields {
-                if let comment = boundedComment(field.type) {
-                    out += "\(indent)    \(comment)\n"
-                }
-                let typeName = swiftType(field.type, nestedNameOverrides: nestedNameOverrides)
-                out += "\(indent)    public var \(field.swiftName): \(typeName)\n"
-            }
-            out += "\n"
-            if fields.count == 1, let f = fields.first {
-                let typeName = swiftType(f.type, nestedNameOverrides: nestedNameOverrides)
-                let defaultVal = initDefault(f, nestedNameOverrides: nestedNameOverrides)
-                out += "\(indent)    public init(\(f.swiftName): \(typeName) = \(defaultVal)) {\n"
-                out += "\(indent)        self.\(f.swiftName) = \(f.swiftName)\n"
-            } else {
-                out += "\(indent)    public init(\n"
-                for (i, f) in fields.enumerated() {
-                    let comma = i == fields.count - 1 ? "" : ","
-                    let typeName = swiftType(f.type, nestedNameOverrides: nestedNameOverrides)
-                    let defaultVal = initDefault(f, nestedNameOverrides: nestedNameOverrides)
-                    out +=
-                        "\(indent)        \(f.swiftName): \(typeName) = \(defaultVal)\(comma)\n"
-                }
-                out += "\(indent)    ) {\n"
-                for f in fields {
-                    out += "\(indent)        self.\(f.swiftName) = \(f.swiftName)\n"
-                }
-            }
-            out += "\(indent)    }\n"
-            out += "\n"
-            out += "\(indent)    public func encode(to encoder: CDREncoder) throws {\n"
-            for f in fields {
-                let body = emitEncodeWithAvailability(f)
-                out += reindent(body, by: indent)
-            }
-            out += "\(indent)    }\n"
-            out += "\n"
-            out += "\(indent)    public init(from decoder: CDRDecoder) throws {\n"
-            for f in fields {
-                let body = emitDecodeWithAvailability(
-                    f, nestedNameOverrides: nestedNameOverrides)
-                out += reindent(body, by: indent)
-            }
-            out += "\(indent)    }\n"
-        }
-        out += "\(indent)}\n"
-        return out
-    }
-
-    /// Reindent a multi-line emitted body (originally indented for a top-level
-    /// struct, i.e. 8 spaces inside the encode/decode method bodies) by an
-    /// extra `prefix`. Empty lines stay empty.
+    /// Reindent multi-line emitted text by an extra `prefix`. Empty lines stay empty.
     static func reindent(_ body: String, by prefix: String) -> String {
         return
             body
@@ -804,10 +741,12 @@ public enum SwiftEmitter {
     }
 
     /// The doc comment of a field that only some modern distributions have, at `indent`: the
-    /// distributions that have it and what it decodes as elsewhere. Empty for a field every
-    /// distribution has and for a field split between Humble and Jazzy.
+    /// distributions that have it and what it decodes as elsewhere, on two lines when one would
+    /// be longer than `width` columns. Empty for a field every distribution has and for a field
+    /// split between Humble and Jazzy.
     static func availabilityDoc(
-        _ field: FieldIR, read: Set<String>?, nestedNameOverrides: [String: String], indent: String
+        _ field: FieldIR, read: Set<String>?, nestedNameOverrides: [String: String], indent: String,
+        width: Int = 120
     ) -> String {
         guard case .onlyIn(let present) = field.availability,
             case .bounded(let since, let until) = fieldGuard(present: present, read: read)
@@ -830,7 +769,7 @@ public enum SwiftEmitter {
         }
         let decoded = "decoded there as `\(initDefault(field, nestedNameOverrides: nestedNameOverrides))`."
         let line = "\(indent)/// \(which) \(elsewhere) \(decoded)"
-        if line.count <= 120 { return line + "\n" }
+        if line.count <= width { return line + "\n" }
         return "\(indent)/// \(which) \(elsewhere)\n\(indent)/// \(decoded)\n"
     }
 
