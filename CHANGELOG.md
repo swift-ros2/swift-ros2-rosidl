@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A generated action has the constants of its goal, result and feedback (for example
+  `FollowJointTrajectoryAction.Result.INVALID_GOAL` of
+  `control_msgs/action/FollowJointTrajectory`); they were dropped. The three parts are now
+  emitted by the message emitter, as the action's wrappers already were.
+
 ## 1.1.1
 
 A fix for the oracle check of large types.
