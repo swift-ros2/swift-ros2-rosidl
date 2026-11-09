@@ -157,7 +157,7 @@ generated type knows the field layout and the hash of each distribution you pass
   distributions than a type it holds still gets that type's hash on every distribution. A type
   that a distribution you passed does not have follows the same rule for that type:
   `nav2_msgs/srv/ClearCostmapAroundPose`, which Kilted lacks, gets Jazzy's layout and hashes on
-  Kilted, finds no peer there, and `--verify-hashes` skips it for Kilted.
+  Kilted, where no such type exists to talk to, and `--verify-hashes` skips it for Kilted.
 - **Pass every distribution you deploy against, for your package and its dependencies.** The
   hashes of your types include those of the dependency types they hold, as you pass them. A
   package generated against a dependency must pass the dependency's IDL for the same
