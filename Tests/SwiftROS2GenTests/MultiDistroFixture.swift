@@ -73,6 +73,36 @@ struct MultiDistroFixture {
         return messages.mapValues { ["msg/ModernVarying.msg": $0, "action/ModernVarying.action": action] }
     }()
 
+    /// `fixture_msgs/action/Merge`, whose `.action` differs in every distribution like
+    /// `nav2_msgs/action/NavigateToPose`, with `std_msgs/Empty` for each distribution:
+    /// - result: `std_msgs/Empty result` on Humble, `error_code` and `error_msg` from Jazzy on,
+    ///   with the constant `NONE`, to which Kilted adds `TIMEOUT` and Lyrical `GOAL_REJECTED`
+    ///   (written before `TIMEOUT` in its file);
+    /// - goal: `order`, plus `behavior` from Kilted on;
+    /// - feedback: `progress`, plus `tracking_error` from Lyrical on.
+    static let merging: [String: [String: [String: String]]] = {
+        let actions = [
+            "humble": "int32 order\n---\nstd_msgs/Empty result\n---\nfloat32 progress\n",
+            "jazzy": "int32 order\n---\nuint16 NONE=0\nuint16 error_code\nstring error_msg\n---\nfloat32 progress\n",
+            "kilted": "int32 order\nstring behavior\n---\nuint16 NONE=0\nuint16 TIMEOUT=9003\n"
+                + "uint16 error_code\nstring error_msg\n---\nfloat32 progress\n",
+            "lyrical": "int32 order\nstring behavior\n---\nuint16 NONE=0\nuint16 GOAL_REJECTED=1\nuint16 TIMEOUT=9003\n"
+                + "uint16 error_code\nstring error_msg\n---\nfloat32 progress\nfloat32 tracking_error\n",
+        ]
+        return [
+            "fixture_msgs": actions.mapValues { ["action/Merge.action": $0] },
+            "std_msgs": actions.mapValues { _ in ["msg/Empty.msg": "\n"] },
+        ]
+    }()
+
+    /// `fixture_msgs/action/Shift` on Jazzy and Lyrical, two of whose parts have no fields in
+    /// one of them: the goal has `int32 order` on Jazzy and no fields on Lyrical, the feedback no
+    /// fields on Jazzy and `float32 x` on Lyrical. The result is `int32 code` on both.
+    static let shifting: [String: [String: String]] = [
+        "jazzy": ["action/Shift.action": "int32 order\n---\nint32 code\n---\n"],
+        "lyrical": ["action/Shift.action": "---\nint32 code\n---\nfloat32 x\n"],
+    ]
+
     /// `fixture_msgs/msg/Grow`: `int32 old` on Humble, no fields on Jazzy and Kilted, and
     /// `float64 x` on Lyrical.
     static let growing: [String: [String: String]] = [

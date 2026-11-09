@@ -256,6 +256,47 @@ extension IRBuilder {
         )
     }
 
+    /// Build one ``ActionIR`` from the `.action` of each distribution that has it.
+    ///
+    /// The goal, the result and the feedback are each merged like a message
+    /// (``build(perDistro:kind:)``): a field that only some distributions have is
+    /// distro-conditional, and the constants are the union. The five wrappers reference the
+    /// three parts by name only, so they are the same for every distribution; each
+    /// distribution's wrapper, service and action hashes come from projecting the merged parts
+    /// onto it (``populateActionHashes(_:distro:extraRegistry:)``), as for an action whose parts
+    /// hold a merged message.
+    ///
+    /// - Throws: ``IRMergeError`` when a field of a part changes type between distributions,
+    ///   and ``IRBuildError`` when a part has an invalid default or constant or when two
+    ///   distributions have the shared fields of a part in a different order.
+    public static func build(perDistro actions: [String: IDLAction]) throws -> ActionIR {
+        precondition(!actions.isEmpty, "IRBuilder.build(perDistro:) needs at least one action")
+        let oldest = oldestDistro(in: actions.keys)
+        let identity = actions[oldest]!
+        let goal = try build(perDistro: actions.mapValues(\.goal), kind: .action)
+        let result = try build(perDistro: actions.mapValues(\.result), kind: .action)
+        let feedback = try build(perDistro: actions.mapValues(\.feedback), kind: .action)
+        let wrappers = synthesizeActionWrappers(
+            actionPackage: identity.package,
+            actionTypeName: identity.typeName,
+            goalFields: goal.fields,
+            resultFields: result.fields,
+            feedbackFields: feedback.fields
+        )
+        return ActionIR(
+            package: identity.package,
+            typeName: identity.typeName,
+            goal: goal,
+            result: result,
+            feedback: feedback,
+            sendGoalRequest: wrappers.sendGoalRequest,
+            sendGoalResponse: wrappers.sendGoalResponse,
+            getResultRequest: wrappers.getResultRequest,
+            getResultResponse: wrappers.getResultResponse,
+            feedbackMessage: wrappers.feedbackMessage
+        )
+    }
+
     /// Synthesize the five wire-level wrapper ``MessageIR``s per the rcl action
     /// protocol, with the field shapes of the rosidl-generated wrappers.
     static func synthesizeActionWrappers(
@@ -447,6 +488,12 @@ extension IRBuilder {
     /// after Humble, in `distroOrder` order. Jazzy comes first, so it stays the
     /// precedence source for the emitted modern `typeInfo` hash.
     public static let modernDistros: [String] = distroOrder.filter { $0 != "humble" }
+
+    /// The oldest of `distros` in ``distroOrder``; when none of them is in it, the first in
+    /// alphabetical order. `distros` must not be empty.
+    static func oldestDistro(in distros: some Collection<String>) -> String {
+        distroOrder.first(where: distros.contains) ?? distros.sorted()[0]
+    }
 
     /// The distro whose IDL gives a type read for the distros `read` its shape and hash on
     /// `distro`: `distro` itself when it was read, else the newest read distro older than

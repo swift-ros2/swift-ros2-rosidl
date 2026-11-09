@@ -187,7 +187,7 @@ struct PipelineDistroPresenceTests {
         #expect(Set(try Pipeline.buildVerifyPlan(fixture.runs).map(\.distro)) == ["jazzy", "kilted", "lyrical"])
     }
 
-    @Test("an action that differs between distributions is rejected")
+    @Test("an action whose field changes type between distributions is rejected")
     func divergentActionIsRejected() throws {
         let package = try SplitPackage()
         defer { package.remove() }
@@ -197,7 +197,24 @@ struct PipelineDistroPresenceTests {
         #expect {
             try Pipeline.generateMulti(package.runs)
         } throws: { error in
-            "\(error)".contains("action 'J' differs between distros")
+            "\(error)".hasSuffix(
+                "l/foo_msgs/action/J.action:1: action 'J' cannot be merged across distributions: "
+                    + "goal field 'g' changes type: int32 in [jazzy], int64 in [lyrical]")
+        }
+    }
+
+    @Test("a service that differs between distributions is rejected")
+    func divergentServiceIsRejected() throws {
+        let package = try SplitPackage()
+        defer { package.remove() }
+        try SplitPackage.write(
+            "int32 a\n---\nint32 b\nint32 c\n",
+            to: package.root.appendingPathComponent("l/foo_msgs/srv/S.srv"))
+        #expect {
+            try Pipeline.generateMulti(package.runs)
+        } throws: { error in
+            "\(error)"
+                == "foo_msgs/srv/S.srv:1: service 'S' differs between distros — multi-distro service merging is not supported"
         }
     }
 }
