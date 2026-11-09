@@ -8,6 +8,9 @@
   `FollowJointTrajectoryAction.Result.INVALID_GOAL` of
   `control_msgs/action/FollowJointTrajectory`); they were dropped. The three parts are now
   emitted by the message emitter, as the action's wrappers already were.
+- `IRMergeError.conflictingFieldType` lists the type of every distribution that has the field.
+  With three or more distributions it could give the first distribution's type for one that
+  changed it, and leave distributions out.
 
 ## 1.1.1
 

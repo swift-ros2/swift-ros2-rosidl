@@ -4,7 +4,9 @@ import Foundation
 /// IDLs cannot be merged into a single distro-neutral IR.
 public struct IRMergeError: Error, CustomStringConvertible, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
-        /// The same `ros2Name` resolves to incompatible `FieldType`s across distros.
+        /// The same `ros2Name` resolves to incompatible `FieldType`s across distros. `name` is
+        /// the first such field in field order; `perDistroTypes` holds its type in every distro
+        /// that has it.
         case conflictingFieldType(name: String, perDistroTypes: [String: FieldType])
         /// Two distros disagree on the package or type name. Should never happen
         /// in practice because the caller groups by `(package, typeName)` before
