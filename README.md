@@ -161,10 +161,14 @@ generated type knows the field layout and the hash of each distribution you pass
   the hashes then do not match what is sent.
 - **What is rejected.** A field must exist in one contiguous run of the distributions passed
   (not in Jazzy and Lyrical but missing from Kilted); fields both distributions have must be in
-  the same order; a field's type (bound included) must not change; and a `.srv` file must be
-  the same in every distribution (one that only references a changed message is fine).
-  Renaming a field reads as removing one and adding another. A distribution in which a
-  message has no fields writes and reads rosidl's one-byte placeholder there, as rosidl does.
+  the same order; a field's type (bound included) must not change; and a service must have the
+  same fields, defaults and constants in every distribution (one that only references a changed
+  message is fine). Renaming a field reads as removing one and adding another. The error names the
+  `.msg`, `.srv` or `.action` file of the distribution that introduces the problem and the
+  line, for example `…/kilted/my_msgs/action/Move.action:4: action 'Move' cannot be merged
+  across distributions: result field 'code' changes type: int32 in [jazzy], int64 in [kilted,
+  lyrical]`. A distribution in which a message has no fields writes and reads rosidl's
+  one-byte placeholder there, as rosidl does.
 
 A program sends the layout and the hash of the distribution it runs against only with a
 swift-ros2 that asks generated types for `typeInfo(for:)` and creates codecs with

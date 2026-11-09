@@ -203,7 +203,7 @@ struct PipelineDistroPresenceTests {
         }
     }
 
-    @Test("a service that differs between distributions is rejected")
+    @Test("a service that differs between distributions is rejected at the first line that differs")
     func divergentServiceIsRejected() throws {
         let package = try SplitPackage()
         defer { package.remove() }
@@ -213,8 +213,9 @@ struct PipelineDistroPresenceTests {
         #expect {
             try Pipeline.generateMulti(package.runs)
         } throws: { error in
-            "\(error)"
-                == "foo_msgs/srv/S.srv:1: service 'S' differs between distros — multi-distro service merging is not supported"
+            "\(error)".hasSuffix(
+                "/l/foo_msgs/srv/S.srv:4: service 'S' cannot be merged across distributions: response differs in "
+                    + "lyrical from jazzy — merging a service that differs between distributions is not supported yet")
         }
     }
 }

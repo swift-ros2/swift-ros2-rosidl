@@ -16,6 +16,15 @@ public struct IDLFile: Equatable, Sendable {
         self.fields = fields
         self.constants = constants
     }
+
+    /// Whether `other` declares the same fields and constants in the same order, ignoring the
+    /// lines they were written on.
+    func sameDeclarations(as other: IDLFile) -> Bool {
+        package == other.package && typeName == other.typeName && fields.count == other.fields.count
+            && constants.count == other.constants.count
+            && zip(fields, other.fields).allSatisfy { $0.0.sameDeclaration(as: $0.1) }
+            && zip(constants, other.constants).allSatisfy { $0.0.sameDeclaration(as: $0.1) }
+    }
 }
 
 /// A single field declaration parsed from a `.msg` file.
@@ -39,6 +48,11 @@ public struct IDLField: Equatable, Sendable {
         self.defaultExpression = defaultExpression
         self.sourceLine = sourceLine
     }
+
+    /// Whether `other` is the same declaration, ignoring the line it was written on.
+    func sameDeclaration(as other: IDLField) -> Bool {
+        name == other.name && type == other.type && defaultExpression == other.defaultExpression
+    }
 }
 
 /// A constant declaration parsed from a `.msg` file (e.g. `int8 STATUS_UNKNOWN=0`).
@@ -56,6 +70,11 @@ public struct IDLConstant: Equatable, Sendable {
         self.type = type
         self.value = value
         self.sourceLine = sourceLine
+    }
+
+    /// Whether `other` is the same declaration, ignoring the line it was written on.
+    func sameDeclaration(as other: IDLConstant) -> Bool {
+        name == other.name && type == other.type && value == other.value
     }
 }
 

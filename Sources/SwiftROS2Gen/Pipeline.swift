@@ -26,6 +26,10 @@ public enum GeneratorError: Error, CustomStringConvertible {
     /// A field exists in distributions that are not one contiguous run of the distributions
     /// read for its type, for example in Jazzy and Lyrical but not Kilted between them.
     /// `missingFrom` lists the read distributions between them that lack it.
+    ///
+    /// The pipeline no longer throws it: like every type that cannot be merged across
+    /// distributions, such a field is reported as ``parse(_:)`` at its line in the IDL file of
+    /// the distribution that has it again.
     case modernDistroDivergence(type: String, field: String, presentIn: [String], missingFrom: [String])
 
     public var description: String {
@@ -166,12 +170,16 @@ extension Pipeline {
         }
     }
 
+    /// The first field of `ir` that is missing from a read distribution between two that have
+    /// it, with the distributions that have it and the ones between them that lack it.
+    ///
     /// Generated code tells whether a distribution has a field by comparing it with the first
     /// read distribution that has the field and the first one after them that lacks it
     /// (`schemaDistro >= .lyrical`), so a field must exist in one contiguous run of the
-    /// distributions `readDistros` read for its type, Humble included. Generation stops on a
-    /// field that is missing from a read distribution between two that have it.
-    static func validateDistroAvailability(_ ir: MessageIR, readDistros: Set<String>) throws {
+    /// distributions `readDistros` read for its type, Humble included.
+    static func distroGap(
+        in ir: MessageIR, readDistros: Set<String>
+    ) -> (field: String, presentIn: [String], missingFrom: [String])? {
         let ordered = IRBuilder.distroOrder.filter(readDistros.contains)
         for field in ir.fields {
             guard case .onlyIn(let present) = field.availability,
@@ -180,11 +188,10 @@ extension Pipeline {
             else { continue }
             let gap = ordered[first...last].filter { !present.contains($0) }
             if !gap.isEmpty {
-                throw GeneratorError.modernDistroDivergence(
-                    type: ir.rosTypeName, field: field.ros2Name,
-                    presentIn: ordered.filter(present.contains), missingFrom: gap)
+                return (field.ros2Name, ordered.filter(present.contains), gap)
             }
         }
+        return nil
     }
 
     /// One parsed message, service half or action part, with the distributions that have it.
@@ -228,69 +235,46 @@ extension Pipeline {
         let dependencyPackages = Set(runs.filter { !$0.emit }.map(\.input.name))
         for pkg in packageOrder {
             let pkgRuns = runsByPackage[pkg]!
-            // Labels and the run of every entry come from the first run of the package.
-            let primaryRun = pkgRuns[0]
-            if pkgRuns.count == 1 {
-                // A package read for one distribution needs no merge.
-                for entry in try parsePackage(run: primaryRun) {
-                    unresolvedIRs.append(
-                        CollectedIR(
-                            ir: entry.ir, sourceLabel: entry.sourceLabel,
-                            topLevelTypeName: entry.ir.typeName, distros: entry.distros))
-                }
-            } else {
-                // Multi-distro path: parse each run's IDLs, group by type name,
-                // then merge per-distro IDLs via IRBuilder.build(perDistro:).
-                for entry in try parseAndMergeMultiDistroPackage(runs: pkgRuns) {
-                    try validateDistroAvailability(entry.ir, readDistros: entry.distros)
-                    unresolvedIRs.append(
-                        CollectedIR(
-                            ir: entry.ir, sourceLabel: entry.sourceLabel,
-                            topLevelTypeName: entry.ir.typeName, distros: entry.distros))
-                }
+            for message in try mergeAcrossDistros(pkgRuns, kind: .msg) {
+                unresolvedIRs.append(
+                    CollectedIR(
+                        ir: message.parts[0], sourceLabel: message.sourceLabel,
+                        topLevelTypeName: message.typeName, distros: message.distros))
             }
-            // Services are the union across the package's runs, each with the distributions
-            // whose IDL has it. Multi-distro merging is unsupported for them: one whose shape
-            // differs between distros is rejected, so we never silently emit one distro's shape.
-            let services = try unionServicesAcrossDistros(pkgRuns)
-            for (svc, distros) in services {
-                let label = sourceLabel(package: svc.package, typeName: svc.typeName, kind: .srv)
-                for half in [svc.requestIDL, svc.responseIDL] {
-                    let ir = try buildIR(file: label) { try IRBuilder.build(jazzy: half, kind: .srv) }
+            for service in try mergeAcrossDistros(pkgRuns, kind: .srv) {
+                for half in service.parts {
                     unresolvedIRs.append(
                         CollectedIR(
-                            ir: ir, sourceLabel: label,
-                            topLevelTypeName: svc.typeName, distros: distros))
+                            ir: half, sourceLabel: service.sourceLabel, topLevelTypeName: service.typeName,
+                            distros: service.distros))
                 }
+                collectedServices.append(
+                    ParsedService(
+                        package: service.package, typeName: service.typeName, requestIDL: service.oldest.idl[0],
+                        responseIDL: service.oldest.idl[1]))
             }
-            collectedServices.append(contentsOf: services.map(\.item))
-
-            // Actions are the union across the package's runs too. One whose `.action` differs
-            // between distros has its goal, result and feedback merged like messages.
-            let actions = try mergeActionsAcrossDistros(pkgRuns)
-            for (act, distros) in actions {
-                let label = sourceLabel(package: act.package, typeName: act.typeName, kind: .action)
-                for part in [act.actionIR.goal, act.actionIR.result, act.actionIR.feedback]
-                where !part.perDistroFieldPresence.isEmpty {
-                    try validateDistroAvailability(part, readDistros: distros)
-                }
+            for action in try mergeAcrossDistros(pkgRuns, kind: .action) {
+                let actionIR = IRBuilder.action(
+                    package: action.package, typeName: action.typeName, goal: action.parts[0],
+                    result: action.parts[1], feedback: action.parts[2])
                 // The user-defined Goal/Result/Feedback IRs go in the registry so wrapper
                 // nested references resolve; the wrappers so the action-level hash and any
                 // cross-package reference to a wrapper resolves.
                 let parts = [
-                    act.actionIR.goal, act.actionIR.result, act.actionIR.feedback,
-                    act.actionIR.sendGoalRequest, act.actionIR.sendGoalResponse,
-                    act.actionIR.getResultRequest, act.actionIR.getResultResponse,
-                    act.actionIR.feedbackMessage,
+                    actionIR.goal, actionIR.result, actionIR.feedback,
+                    actionIR.sendGoalRequest, actionIR.sendGoalResponse,
+                    actionIR.getResultRequest, actionIR.getResultResponse,
+                    actionIR.feedbackMessage,
                 ]
                 for ir in parts {
                     unresolvedIRs.append(
                         CollectedIR(
-                            ir: ir, sourceLabel: label, topLevelTypeName: act.typeName,
-                            distros: distros))
+                            ir: ir, sourceLabel: action.sourceLabel, topLevelTypeName: action.typeName,
+                            distros: action.distros))
                 }
+                collectedActions.append(
+                    ParsedAction(package: action.package, typeName: action.typeName, actionIR: actionIR))
             }
-            collectedActions.append(contentsOf: actions.map(\.item))
         }
         var registry: [String: MessageIR] = [:]
         for entry in unresolvedIRs {
@@ -323,36 +307,6 @@ extension Pipeline {
             dependencyPackages: dependencyPackages)
     }
 
-    /// The services of every run of one package, in first-seen order, each with the
-    /// distributions whose IDL has it. Throws when one differs between distributions.
-    private static func unionServicesAcrossDistros(
-        _ runs: [PackageRun]
-    ) throws -> [(item: ParsedService, distros: Set<String>)] {
-        var union: [(item: ParsedService, distros: Set<String>)] = []
-        var indexByName: [String: Int] = [:]
-        for run in runs {
-            for item in try parseServicesIn(run: run) {
-                let name = item.typeName
-                guard let index = indexByName[name] else {
-                    indexByName[name] = union.count
-                    union.append((item, [run.input.distro]))
-                    continue
-                }
-                guard union[index].item == item else {
-                    throw GeneratorError.parse(
-                        ParseError(
-                            file: sourceLabel(package: run.input.name, typeName: name, kind: .srv),
-                            line: 1,
-                            message:
-                                "service '\(name)' differs between distros — multi-distro service merging is not supported"
-                        ))
-                }
-                union[index].distros.insert(run.input.distro)
-            }
-        }
-        return union
-    }
-
     /// Multi-package generation. All inputs are parsed first, then the resulting IRs
     /// are aggregated into a registry. Hashing and emission run after the registry is
     /// complete so cross-package references (e.g. `std_msgs/Header → builtin_interfaces/Time`)
@@ -360,11 +314,13 @@ extension Pipeline {
     ///
     /// When two `runs` share the same `input.name` (typically because
     /// the caller passed both a Humble and a Jazzy directory for the same
-    /// package), the per-distro IDL files for each type are merged via
-    /// ``IRBuilder/build(perDistro:kind:)`` into a single distro-conditional IR (an action's
-    /// via ``IRBuilder/build(perDistro:)`` when its `.action` differs between them).
-    /// `unresolvedIRs` then carries one merged IR per `(package, typeName)`
-    /// even though the source IDLs come from multiple distros.
+    /// package), each message, service and action is generated once from the files of every
+    /// distribution that has it: from the oldest one's when they build the same, else with
+    /// each part (the message, or the goal, the result and the feedback of an action) merged
+    /// as ``IRBuilder/build(perDistro:kind:)`` merges it into a distro-conditional IR. A
+    /// service that differs between distributions is rejected; it is not merged yet. A type
+    /// that cannot be merged throws ``GeneratorError/parse(_:)`` at the IDL file and line of
+    /// the distribution that introduces the problem.
     public static func generateMulti(
         _ runs: [PackageRun],
         moduleNames: ModuleNames = [:]
@@ -677,9 +633,9 @@ extension Pipeline {
         return files
     }
 
-    /// Lightweight carrier for an as-parsed `.srv`: the two halves' IDLFiles, from which the
-    /// pipeline builds their IRs. The request / response halves are emitted via the regular
-    /// message emission path; the umbrella enum is emitted from this carrier.
+    /// Lightweight carrier for an as-parsed `.srv`: the two halves' IDLFiles (of the oldest
+    /// distribution that has the service). The request / response halves are emitted via the
+    /// regular message emission path; the umbrella enum is emitted from this carrier.
     public struct ParsedService: Equatable, Sendable {
         public let package: String
         public let typeName: String
@@ -692,13 +648,6 @@ extension Pipeline {
             self.requestIDL = requestIDL
             self.responseIDL = responseIDL
         }
-    }
-
-    private struct ParsedEntry {
-        let ir: MessageIR
-        let sourceLabel: String
-        /// The distributions whose IDL has the type.
-        let distros: Set<String>
     }
 
     /// One IDL file of a package: the type it defines (the file stem), its location and its text.
@@ -885,90 +834,12 @@ public struct VerifyPlanEntry: Sendable, Equatable {
 }
 
 extension Pipeline {
-    /// Parses the `.msg` files of one run. Parse errors name the file's path.
-    private static func parsePackage(run: PackageRun) throws -> [ParsedEntry] {
-        try idlSources(of: run, kind: .msg, allowList: run.typesAllowList).map { source in
-            let idl = try parse {
-                try Parser.parseMessage(
-                    source: source.contents, file: source.url.path, package: run.input.name,
-                    typeName: source.typeName)
-            }
-            return ParsedEntry(
-                ir: try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) },
-                sourceLabel: sourceLabel(package: run.input.name, typeName: source.typeName, kind: .msg),
-                distros: [run.input.distro])
-        }
-    }
-
     /// Runs a parser call, reporting a ``ParseError`` as ``GeneratorError/parse(_:)``.
     private static func parse<T>(_ body: () throws -> T) throws -> T {
         do {
             return try body()
         } catch let error as ParseError {
             throw GeneratorError.parse(error)
-        }
-    }
-
-    /// Parses the `.srv` files of one run into request / response halves, as ``ParsedService``
-    /// carriers. The type allow-list matches the bare service name (`CancelGoal`).
-    private static func parseServicesIn(run: PackageRun) throws -> [ParsedService] {
-        try idlSources(of: run, kind: .srv, allowList: run.typesAllowList).map { source in
-            let svc = try parse {
-                try Parser.parseService(
-                    source: source.contents, file: source.url.path, package: run.input.name,
-                    typeName: source.typeName)
-            }
-            return ParsedService(
-                package: run.input.name, typeName: source.typeName, requestIDL: svc.request,
-                responseIDL: svc.response)
-        }
-    }
-
-    /// Parses the `.msg` files of every run of one package (one run per distribution) and merges
-    /// the per-distribution IDL of each type with ``IRBuilder/build(perDistro:kind:)`` into one
-    /// distro-conditional IR. `pkgRuns` all share one package name; ``collect(_:)`` groups them.
-    private static func parseAndMergeMultiDistroPackage(
-        runs pkgRuns: [PackageRun]
-    ) throws -> [ParsedEntry] {
-        precondition(!pkgRuns.isEmpty, "parseAndMergeMultiDistroPackage: empty runs")
-        let packageName = pkgRuns[0].input.name
-        precondition(
-            pkgRuns.allSatisfy { $0.input.name == packageName },
-            "parseAndMergeMultiDistroPackage: all runs must share the same package name")
-
-        // A type takes part in the merge when any run's allow-list has it. The CLI gives every
-        // run the same `--types` filter.
-        var unifiedAllowList: Set<String>? = nil
-        for run in pkgRuns {
-            if let allow = run.typesAllowList {
-                unifiedAllowList = (unifiedAllowList ?? []).union(allow)
-            }
-        }
-
-        // Per-distro IDL of each type, and the types in first-seen order.
-        var idlsByType: [String: [String: IDLFile]] = [:]
-        var typeOrder: [String] = []
-        for run in pkgRuns {
-            for source in try idlSources(of: run, kind: .msg, allowList: unifiedAllowList) {
-                let idl = try parse {
-                    try Parser.parseMessage(
-                        source: source.contents, file: source.url.path, package: packageName,
-                        typeName: source.typeName)
-                }
-                // Validate each distribution's defaults and constants against its own file,
-                // so an error names the file and line it comes from.
-                _ = try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) }
-                if idlsByType[source.typeName] == nil { typeOrder.append(source.typeName) }
-                idlsByType[source.typeName, default: [:]][run.input.distro] = idl
-            }
-        }
-
-        return try typeOrder.map { typeName in
-            let perDistroIDL = idlsByType[typeName]!
-            return ParsedEntry(
-                ir: try IRBuilder.build(perDistro: perDistroIDL),
-                sourceLabel: sourceLabel(package: packageName, typeName: typeName, kind: .msg),
-                distros: Set(perDistroIDL.keys))
         }
     }
 
@@ -1029,104 +900,226 @@ extension Pipeline {
     /// ``GeneratorError/packageDirectoryMissing(_:)``. The type allow-list matches the bare
     /// action name (`Fibonacci`).
     public static func parseActionsIn(run: PackageRun) throws -> [ParsedAction] {
-        try parseActionSources(of: run).map(\.action)
+        try interfaceSources(of: run, kind: .action, allowList: run.typesAllowList).map { typeName, source in
+            ParsedAction(
+                package: run.input.name, typeName: typeName,
+                actionIR: IRBuilder.action(
+                    package: run.input.name, typeName: typeName, goal: source.ir[0], result: source.ir[1],
+                    feedback: source.ir[2]))
+        }
     }
+}
 
-    /// One `.action` file of a run: its location, its parsed IDL and the action built from it.
-    private struct ActionSource {
+extension Pipeline {
+    /// One `.msg`, `.srv` or `.action` file of one distribution: its path and its parts (the
+    /// message; the request and the response; or the goal, the result and the feedback), as
+    /// parsed and as built on their own, so that an invalid default or constant is reported
+    /// with the file and line it comes from.
+    struct InterfaceSource {
         let path: String
-        let idl: IDLAction
-        let action: ParsedAction
-    }
+        let idl: [IDLFile]
+        let ir: [MessageIR]
 
-    /// The `.action` files of one run, each parsed and built on its own, so that an invalid
-    /// default or constant is reported with the file and line it comes from.
-    private static func parseActionSources(of run: PackageRun) throws -> [ActionSource] {
-        try idlSources(of: run, kind: .action, allowList: run.typesAllowList).map { source in
-            let idl = try parse {
-                try Parser.parseAction(
-                    source: source.contents, file: source.url.path, package: run.input.name,
-                    typeName: source.typeName)
-            }
-            let ir = try buildIR(file: source.url.path) { try IRBuilder.build(jazzy: idl) }
-            return ActionSource(
-                path: source.url.path, idl: idl,
-                action: ParsedAction(package: run.input.name, typeName: source.typeName, actionIR: ir))
+        /// Whether `other` has the same parts, as parsed, apart from the lines they were
+        /// written on. Comments and layout never reach the parsed IDL; nothing is compared as a
+        /// number, so a default such as `nan` or `-0.0` is the same as itself and different from
+        /// `0.0`.
+        func sameParts(as other: InterfaceSource) -> Bool {
+            idl.count == other.idl.count && zip(idl, other.idl).allSatisfy { $0.0.sameDeclarations(as: $0.1) }
         }
     }
 
-    /// The actions of every run of one package, in first-seen order, each with the distributions
-    /// whose IDL has it. An action whose `.action` builds the same in every distribution that has
-    /// it is the action of the oldest of them, exactly as from a single distribution. One that
-    /// differs is merged with ``IRBuilder/build(perDistro:)``: its goal, result and feedback are
-    /// merged like messages, so a field only some distributions have is distro-conditional.
+    /// One message, service or action of a package, from the files of the distributions that
+    /// have it.
+    struct InterfaceType {
+        let package: String
+        let typeName: String
+        let kind: MessageKind
+        /// The distributions whose IDL has the type.
+        let distros: Set<String>
+        /// The file of the oldest of `distros`.
+        let oldest: InterfaceSource
+        /// The parts, in file order: those of `oldest` when every distribution builds them the
+        /// same, else each part merged across `distros`.
+        let parts: [MessageIR]
+
+        /// The `// Source:` label of the type's generated files.
+        var sourceLabel: String { Pipeline.sourceLabel(package: package, typeName: typeName, kind: kind) }
+    }
+
+    /// How merge errors name a type of `kind` (`message`, `service`, `action`) and its parts,
+    /// in file order: a message is its only part and has no name.
+    static func mergeErrorNames(_ kind: MessageKind) -> (type: String, parts: [String]) {
+        switch kind {
+        case .msg: return ("message", [""])
+        case .srv: return ("service", ["request", "response"])
+        case .action: return ("action", ["goal", "result", "feedback"])
+        }
+    }
+
+    /// Whether a type of `kind` whose parts differ between distributions is merged. Services
+    /// are not merged yet: one that differs is checked like any other type and then rejected.
+    static func mergesDifferingTypes(_ kind: MessageKind) -> Bool {
+        kind != .srv
+    }
+
+    /// The `.msg`, `.srv` or `.action` files (by `kind`) of `run` whose type name passes
+    /// `allowList`, sorted by file name, each with its type name, parsed and built.
+    private static func interfaceSources(
+        of run: PackageRun, kind: MessageKind, allowList: Set<String>?
+    ) throws -> [(typeName: String, source: InterfaceSource)] {
+        let package = run.input.name
+        return try idlSources(of: run, kind: kind, allowList: allowList).map { file in
+            let path = file.url.path
+            let idl = try parse { () -> [IDLFile] in
+                switch kind {
+                case .msg:
+                    return [
+                        try Parser.parseMessage(
+                            source: file.contents, file: path, package: package, typeName: file.typeName)
+                    ]
+                case .srv:
+                    let service = try Parser.parseService(
+                        source: file.contents, file: path, package: package, typeName: file.typeName)
+                    return [service.request, service.response]
+                case .action:
+                    let action = try Parser.parseAction(
+                        source: file.contents, file: path, package: package, typeName: file.typeName)
+                    return [action.goal, action.result, action.feedback]
+                }
+            }
+            let ir = try buildIR(file: path) { try idl.map { try IRBuilder.build(jazzy: $0, kind: kind) } }
+            return (file.typeName, InterfaceSource(path: path, idl: idl, ir: ir))
+        }
+    }
+
+    /// The messages, services or actions (by `kind`) of every run of one package, in
+    /// first-seen order, each from the files of the distributions that have it. A type whose
+    /// files build the same in every distribution is the type of the oldest of them, exactly as
+    /// from a single distribution. One that differs has each part merged with
+    /// ``IRBuilder/build(perDistro:kind:)``, so a field that only some distributions have is
+    /// distro-conditional, and checked for fields that skip a distribution
+    /// (``distroGap(in:readDistros:)``); a service that differs is then rejected
+    /// (``mergesDifferingTypes(_:)``).
     ///
-    /// - Throws: ``GeneratorError/parse(_:)`` naming the `.action` file and the distributions
-    ///   when a field of the goal, result or feedback changes type between distributions or
-    ///   when two distributions have shared fields in a different order.
-    static func mergeActionsAcrossDistros(
-        _ runs: [PackageRun]
-    ) throws -> [(item: ParsedAction, distros: Set<String>)] {
-        var sourcesByName: [String: [String: ActionSource]] = [:]
+    /// A type takes part when any run's allow-list has it. The CLI gives every run the same
+    /// `--types` filter.
+    ///
+    /// - Throws: ``GeneratorError/parse(_:)`` at the file and line of the distribution that
+    ///   introduces the problem when a type cannot be merged: a field changes type (with its
+    ///   type in every distribution), shared fields change order, a field skips a distribution,
+    ///   or a service differs.
+    static func mergeAcrossDistros(_ runs: [PackageRun], kind: MessageKind) throws -> [InterfaceType] {
+        var allowList: Set<String>? = nil
+        for run in runs {
+            if let allow = run.typesAllowList { allowList = (allowList ?? []).union(allow) }
+        }
+        var sourcesByName: [String: [String: InterfaceSource]] = [:]
         var order: [String] = []
         for run in runs {
-            for source in try parseActionSources(of: run) {
-                let name = source.action.typeName
+            for (name, source) in try interfaceSources(of: run, kind: kind, allowList: allowList) {
                 if sourcesByName[name] == nil { order.append(name) }
                 sourcesByName[name, default: [:]][run.input.distro] = source
             }
         }
-        return try order.map { name in
-            let sources = sourcesByName[name]!
-            let distros = Set(sources.keys)
-            let oldest = sources[IRBuilder.oldestDistro(in: sources.keys)]!
-            if sources.values.allSatisfy({ $0.action == oldest.action }) {
-                return (oldest.action, distros)
-            }
-            let package = oldest.action.package
-            let label = sourceLabel(package: package, typeName: name, kind: .action)
-            do {
-                let merged = try buildIR(file: label) { try IRBuilder.build(perDistro: sources.mapValues(\.idl)) }
-                return (ParsedAction(package: package, typeName: name, actionIR: merged), distros)
-            } catch let error as IRMergeError {
-                throw actionMergeError(error, action: oldest.idl, sources: sources, label: label)
-            }
-        }
+        return try order.map { try merge($0, kind: kind, sources: sourcesByName[$0]!) }
     }
 
-    /// The error for an action whose goal, result or feedback cannot be merged. A field that
-    /// changes type is reported at its line in the `.action` of the first distribution that
-    /// changes it, with the type of every distribution that has it.
-    private static func actionMergeError(
-        _ error: IRMergeError, action: IDLAction, sources: [String: ActionSource], label: String
-    ) -> GeneratorError {
-        let message = "action '\(action.typeName)' cannot be merged across distributions"
-        let parts: [(name: String, idl: (IDLAction) -> IDLFile)] = [
-            ("goal", \.goal), ("result", \.result), ("feedback", \.feedback),
-        ]
-        guard case .conflictingFieldType(let field, let perDistroTypes) = error.kind,
-            let part = parts.first(where: { error.typeName == "\(action.package)/\($0.idl(action).typeName)" })
-        else {
-            return .parse(ParseError(file: label, line: 1, message: "\(message): \(error)"))
+    /// The type `typeName` of `kind` from the file of each distribution that has it; see
+    /// ``mergeAcrossDistros(_:kind:)``.
+    private static func merge(
+        _ typeName: String, kind: MessageKind, sources: [String: InterfaceSource]
+    ) throws -> InterfaceType {
+        let oldestDistro = IRBuilder.oldestDistro(in: sources.keys)
+        let oldest = sources[oldestDistro]!
+        let package = oldest.idl[0].package
+        func type(_ parts: [MessageIR]) -> InterfaceType {
+            InterfaceType(
+                package: package, typeName: typeName, kind: kind, distros: Set(sources.keys), oldest: oldest,
+                parts: parts)
         }
-        // The distributions that have the field, grouped by its type in order of appearance.
-        var groups: [(type: FieldType, distros: [String])] = []
-        for distro in IRBuilder.distroOrder {
-            guard let type = perDistroTypes[distro] else { continue }
-            if let i = groups.firstIndex(where: { $0.type == type }) {
-                groups[i].distros.append(distro)
-            } else {
-                groups.append((type, [distro]))
+        if sources.values.allSatisfy({ $0.sameParts(as: oldest) }) {
+            return type(oldest.ir)
+        }
+        let label = sourceLabel(package: package, typeName: typeName, kind: kind)
+        let names = mergeErrorNames(kind)
+        // `<kind> '<Type>' cannot be merged across distributions: <part> <detail>`, at `line` of
+        // the file of `distro`.
+        func failure(_ part: Int, _ detail: String, in distro: String?, line: Int) -> GeneratorError {
+            let name = names.parts[part]
+            return .parse(
+                ParseError(
+                    file: distro.map { sources[$0]!.path } ?? label, line: line,
+                    message:
+                        "\(names.type) '\(typeName)' cannot be merged across distributions: \(name.isEmpty ? "" : "\(name) ")\(detail)"
+                ))
+        }
+        // The line of field `field` of `part` in the file of `distro`.
+        func line(of field: String, _ part: Int, in distro: String) -> Int {
+            sources[distro]!.idl[part].fields.first { $0.name == field }?.sourceLine ?? 1
+        }
+
+        var parts: [MessageIR] = []
+        for part in oldest.idl.indices {
+            do {
+                parts.append(
+                    try buildIR(file: label) {
+                        try IRBuilder.merge(perDistro: sources.mapValues { $0.idl[part] }, kind: kind)
+                    })
+            } catch let error as IRMergeError {
+                guard case .conflictingFieldType(let field, let perDistroTypes) = error.kind else {
+                    throw failure(part, "\(error)", in: nil, line: 1)
+                }
+                // The distributions that have the field, grouped by its type in order of appearance.
+                var groups: [(type: FieldType, distros: [String])] = []
+                for distro in IRBuilder.distroOrder {
+                    guard let type = perDistroTypes[distro] else { continue }
+                    if let i = groups.firstIndex(where: { $0.type == type }) {
+                        groups[i].distros.append(distro)
+                    } else {
+                        groups.append((type, [distro]))
+                    }
+                }
+                let changed = groups.count > 1 ? groups[1].distros[0] : groups[0].distros[0]
+                let types = groups.map { "\(idlName($0.type)) in [\($0.distros.joined(separator: ", "))]" }
+                throw failure(
+                    part, "field '\(field)' changes type: \(types.joined(separator: ", "))", in: changed,
+                    line: line(of: field, part, in: changed))
+            } catch let error as FieldOrderError {
+                throw failure(part, error.detail, in: error.distro, line: line(of: error.field, part, in: error.distro))
             }
         }
-        let changed = groups.count > 1 ? groups[1].distros[0] : groups[0].distros[0]
-        let source = sources[changed]!
-        let line = part.idl(source.idl).fields.first { $0.name == field }?.sourceLine ?? 1
-        let types = groups.map { "\(idlName($0.type)) in [\($0.distros.joined(separator: ", "))]" }
-        return .parse(
-            ParseError(
-                file: source.path, line: line,
-                message: "\(message): \(part.name) field '\(field)' changes type: \(types.joined(separator: ", "))"))
+        for (part, ir) in parts.enumerated() {
+            guard let gap = distroGap(in: ir, readDistros: Set(sources.keys)) else { continue }
+            // The distribution that has the field again after the gap.
+            let back = gap.presentIn.first {
+                IRBuilder.distroOrder.firstIndex(of: $0)! > IRBuilder.distroOrder.firstIndex(of: gap.missingFrom[0])!
+            }!
+            func list(_ distros: [String]) -> String { "[" + distros.joined(separator: ", ") + "]" }
+            throw failure(
+                part,
+                "field '\(gap.field)' exists in \(list(gap.presentIn)) but not in \(list(gap.missingFrom)) between them — a field must exist in one contiguous run of distributions",
+                in: back, line: line(of: gap.field, part, in: back))
+        }
+        guard mergesDifferingTypes(kind) else {
+            // Reported in the oldest distribution whose parts differ from the oldest one's, at
+            // the first field or constant of the first differing part that the oldest one's part
+            // does not have (line 1 when the part only lacks some).
+            let differing = IRBuilder.oldestDistro(in: sources.keys.filter { !sources[$0]!.sameParts(as: oldest) })
+            let source = sources[differing]!
+            let part = oldest.idl.indices.first { !source.idl[$0].sameDeclarations(as: oldest.idl[$0]) }!
+            let fieldLines = source.idl[part].fields
+                .filter { field in !oldest.idl[part].fields.contains { $0.sameDeclaration(as: field) } }
+                .map(\.sourceLine)
+            let constantLines = source.idl[part].constants
+                .filter { constant in !oldest.idl[part].constants.contains { $0.sameDeclaration(as: constant) } }
+                .map(\.sourceLine)
+            throw failure(
+                part,
+                "differs in \(differing) from \(oldestDistro) — merging a \(names.type) that differs between distributions is not supported yet",
+                in: differing, line: (fieldLines + constantLines).min() ?? 1)
+        }
+        return type(parts)
     }
 
     /// `type` as an IDL file writes it: `int32`, `string<=8`, `geometry_msgs/Pose[3]`.
