@@ -203,19 +203,28 @@ struct PipelineDistroPresenceTests {
         }
     }
 
-    @Test("a service that differs between distributions is rejected at the first line that differs")
-    func divergentServiceIsRejected() throws {
+    @Test("a service that differs between distributions is merged, with the distributions that have it")
+    func divergentServiceIsMerged() throws {
         let package = try SplitPackage()
         defer { package.remove() }
         try SplitPackage.write(
             "int32 a\n---\nint32 b\nint32 c\n",
             to: package.root.appendingPathComponent("l/foo_msgs/srv/S.srv"))
-        #expect {
-            try Pipeline.generateMulti(package.runs)
-        } throws: { error in
-            "\(error)".hasSuffix(
-                "/l/foo_msgs/srv/S.srv:4: service 'S' cannot be merged across distributions: response differs in "
-                    + "lyrical from jazzy — merging a service that differs between distributions is not supported yet")
+        let response = try #require(
+            try Pipeline.generateMulti(package.runs).first { $0.relativePath == "FooMsgs/SResponse.swift" })
+        let guarded = "        if encoder.schemaDistro >= .lyrical {\n            encoder.writeInt32(c)\n"
+        #expect(response.contents.contains(guarded))
+
+        let samples = try Pipeline.generateOracleSamples(package.runs)
+        let registry = try #require(samples.first { $0.relativePath == "OracleSamples.swift" }).contents
+        #expect(sampleDistributions(registry, "foo_msgs/srv/S_Request") == "[\"jazzy\", \"lyrical\"],")
+        #expect(sampleDistributions(registry, "foo_msgs/srv/S_Response") == "[\"jazzy\", \"lyrical\"],")
+        var planned: [String: Set<String>] = [:]
+        for entry in try Pipeline.buildVerifyPlan(package.runs) {
+            planned[entry.rosTypeName, default: []].insert(entry.distro)
+        }
+        for name in ["S_Request", "S_Response", "S", "S_Event"] {
+            #expect(planned["foo_msgs/srv/\(name)"] == ["jazzy", "lyrical"], "\(name)")
         }
     }
 }

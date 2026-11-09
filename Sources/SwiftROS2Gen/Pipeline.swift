@@ -316,11 +316,11 @@ extension Pipeline {
     /// the caller passed both a Humble and a Jazzy directory for the same
     /// package), each message, service and action is generated once from the files of every
     /// distribution that has it: from the oldest one's when they build the same, else with
-    /// each part (the message, or the goal, the result and the feedback of an action) merged
-    /// as ``IRBuilder/build(perDistro:kind:)`` merges it into a distro-conditional IR. A
-    /// service that differs between distributions is rejected; it is not merged yet. A type
-    /// that cannot be merged throws ``GeneratorError/parse(_:)`` at the IDL file and line of
-    /// the distribution that introduces the problem.
+    /// each part (the message; the request and the response of a service; or the goal, the
+    /// result and the feedback of an action) merged as ``IRBuilder/build(perDistro:kind:)``
+    /// merges it into a distro-conditional IR. A type that cannot be merged throws
+    /// ``GeneratorError/parse(_:)`` at the IDL file and line of the distribution that
+    /// introduces the problem.
     public static func generateMulti(
         _ runs: [PackageRun],
         moduleNames: ModuleNames = [:]
@@ -634,8 +634,9 @@ extension Pipeline {
     }
 
     /// Lightweight carrier for an as-parsed `.srv`: the two halves' IDLFiles (of the oldest
-    /// distribution that has the service). The request / response halves are emitted via the
-    /// regular message emission path; the umbrella enum is emitted from this carrier.
+    /// distribution that has the service). The request / response halves, merged across
+    /// distributions when they differ, are emitted via the regular message emission path; the
+    /// umbrella enum is emitted from this carrier.
     public struct ParsedService: Equatable, Sendable {
         public let package: String
         public let typeName: String
@@ -957,12 +958,6 @@ extension Pipeline {
         }
     }
 
-    /// Whether a type of `kind` whose parts differ between distributions is merged. Services
-    /// are not merged yet: one that differs is checked like any other type and then rejected.
-    static func mergesDifferingTypes(_ kind: MessageKind) -> Bool {
-        kind != .srv
-    }
-
     /// The `.msg`, `.srv` or `.action` files (by `kind`) of `run` whose type name passes
     /// `allowList`, sorted by file name, each with its type name, parsed and built.
     private static func interfaceSources(
@@ -999,16 +994,15 @@ extension Pipeline {
     /// from a single distribution. One that differs has each part merged with
     /// ``IRBuilder/build(perDistro:kind:)``, so a field that only some distributions have is
     /// distro-conditional, and checked for fields that skip a distribution
-    /// (``distroGap(in:readDistros:)``); a service that differs is then rejected
-    /// (``mergesDifferingTypes(_:)``).
+    /// (``distroGap(in:readDistros:)``).
     ///
     /// A type takes part when any run's allow-list has it. The CLI gives every run the same
     /// `--types` filter.
     ///
     /// - Throws: ``GeneratorError/parse(_:)`` at the file and line of the distribution that
     ///   introduces the problem when a type cannot be merged: a field changes type (with its
-    ///   type in every distribution), shared fields change order, a field skips a distribution,
-    ///   or a service differs.
+    ///   type in every distribution), shared fields change order, or a field skips a
+    ///   distribution.
     static func mergeAcrossDistros(_ runs: [PackageRun], kind: MessageKind) throws -> [InterfaceType] {
         var allowList: Set<String>? = nil
         for run in runs {
@@ -1100,24 +1094,6 @@ extension Pipeline {
                 part,
                 "field '\(gap.field)' exists in \(list(gap.presentIn)) but not in \(list(gap.missingFrom)) between them — a field must exist in one contiguous run of distributions",
                 in: back, line: line(of: gap.field, part, in: back))
-        }
-        guard mergesDifferingTypes(kind) else {
-            // Reported in the oldest distribution whose parts differ from the oldest one's, at
-            // the first field or constant of the first differing part that the oldest one's part
-            // does not have (line 1 when the part only lacks some).
-            let differing = IRBuilder.oldestDistro(in: sources.keys.filter { !sources[$0]!.sameParts(as: oldest) })
-            let source = sources[differing]!
-            let part = oldest.idl.indices.first { !source.idl[$0].sameDeclarations(as: oldest.idl[$0]) }!
-            let fieldLines = source.idl[part].fields
-                .filter { field in !oldest.idl[part].fields.contains { $0.sameDeclaration(as: field) } }
-                .map(\.sourceLine)
-            let constantLines = source.idl[part].constants
-                .filter { constant in !oldest.idl[part].constants.contains { $0.sameDeclaration(as: constant) } }
-                .map(\.sourceLine)
-            throw failure(
-                part,
-                "differs in \(differing) from \(oldestDistro) — merging a \(names.type) that differs between distributions is not supported yet",
-                in: differing, line: (fieldLines + constantLines).min() ?? 1)
         }
         return type(parts)
     }

@@ -138,19 +138,26 @@ generated type knows the field layout and the hash of each distribution you pass
   (at any depth, in any package) and the services and actions that use it, gets
   `typeInfo(for:)` with one hash per change; `typeInfo` is the Jazzy one. A field split
   between Humble and Jazzy keeps the `isLegacySchema` form of 1.0.
-- **Actions that differ between distributions.** The goal, the result and the feedback of an
-  `.action` are each merged like a message, and each distribution gets the hashes of its own
-  `.action`. For example, `nav2_msgs/action/NavigateToPose` has `std_msgs/Empty result` on
-  Humble and `error_code` and `error_msg` from Jazzy on, and its Lyrical feedback adds two
-  fields: `Result` has all three properties, and `NavigateToPoseAction.typeInfo(for:)` returns
-  the Lyrical feedback hashes on Lyrical. Constants, of a message or of an action's parts, are
-  those of every distribution you pass, with the newest value where they differ, and are
-  declared for every distribution.
+- **Services and actions that differ between distributions.** The request and the response of
+  a `.srv`, and the goal, the result and the feedback of an `.action`, are each merged like a
+  message, and each distribution gets the hashes of its own `.srv` or `.action`. For example,
+  `nav2_msgs/srv/IsPathValid` adds two request fields in Kilted, and four more and the response
+  field `success` in Lyrical: `IsPathValidSrv.typeInfo(for:)` returns the request, response and
+  service hashes of Jazzy, Kilted or Lyrical on each. `nav2_msgs/action/NavigateToPose` has
+  `std_msgs/Empty result` on Humble and `error_code` and `error_msg` from Jazzy on, and its
+  Lyrical feedback adds two fields: `Result` has all three properties, and
+  `NavigateToPoseAction.typeInfo(for:)` returns the Lyrical feedback hashes on Lyrical.
+  Constants, of a message or of a service's or an action's parts, are those of every
+  distribution you pass, with the newest value where they differ, and are declared for every
+  distribution.
 - **What a distribution you did not pass gets.** A distribution takes the layout and the hash
   of the newest distribution you passed that is not newer than it, else of the oldest you
   passed: Rolling without Rolling IDL gets Lyrical's, and an unread Kilted between Jazzy and
   Lyrical gets Jazzy's. Each package follows its own set, so a type read for fewer
-  distributions than a type it holds still gets that type's hash on every distribution.
+  distributions than a type it holds still gets that type's hash on every distribution. A type
+  that a distribution you passed does not have follows the same rule for that type:
+  `nav2_msgs/srv/ClearCostmapAroundPose`, which Kilted lacks, gets Jazzy's layout and hashes on
+  Kilted, finds no peer there, and `--verify-hashes` skips it for Kilted.
 - **Pass every distribution you deploy against, for your package and its dependencies.** The
   hashes of your types include those of the dependency types they hold, as you pass them. A
   package generated against a dependency must pass the dependency's IDL for the same
@@ -161,14 +168,13 @@ generated type knows the field layout and the hash of each distribution you pass
   the hashes then do not match what is sent.
 - **What is rejected.** A field must exist in one contiguous run of the distributions passed
   (not in Jazzy and Lyrical but missing from Kilted); fields both distributions have must be in
-  the same order; a field's type (bound included) must not change; and a service must have the
-  same fields, defaults and constants in every distribution (one that only references a changed
-  message is fine). Renaming a field reads as removing one and adding another. The error names the
-  `.msg`, `.srv` or `.action` file of the distribution that introduces the problem and the
-  line, for example `…/kilted/my_msgs/action/Move.action:4: action 'Move' cannot be merged
-  across distributions: result field 'code' changes type: int32 in [jazzy], int64 in [kilted,
-  lyrical]`. A distribution in which a message has no fields writes and reads rosidl's
-  one-byte placeholder there, as rosidl does.
+  the same order; and a field's type (bound included) must not change. Renaming a field reads as
+  removing one and adding another. The error names the `.msg`, `.srv` or `.action` file of the
+  distribution that introduces the problem and the line, for example
+  `…/kilted/my_msgs/action/Move.action:4: action 'Move' cannot be merged across distributions:
+  result field 'code' changes type: int32 in [jazzy], int64 in [kilted, lyrical]`. A
+  distribution in which a message has no fields writes and reads rosidl's one-byte placeholder
+  there, as rosidl does.
 
 A program sends the layout and the hash of the distribution it runs against only with a
 swift-ros2 that asks generated types for `typeInfo(for:)` and creates codecs with

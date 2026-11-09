@@ -11,26 +11,31 @@
   `typeInfo(for:)` returns each distribution's hashes of the parts, the wrappers and the
   SendGoal and GetResult services, as rosidl computes them from that distribution's `.action`.
   New `IRBuilder.build(perDistro:)` overload for `[String: IDLAction]`.
+- Services whose `.srv` differs between distributions, such as `nav2_msgs/srv/IsPathValid`,
+  whose request gains fields in Kilted and Lyrical and whose response gains `success` in
+  Lyrical; they were rejected. The request and the response are merged like messages: a field
+  that only some distributions have is written and read only for them, and the constants are
+  those of every distribution. `<Name>Srv.typeInfo(for:)` returns each distribution's request,
+  response and service hashes, as rosidl computes them from that distribution's `.srv`, and
+  `--verify-hashes` checks the service's event type on each distribution too.
 
 ### Changed
 
 - An action whose goal, result or feedback field changes type between distributions is
   reported at that field's line in the `.action` of the first distribution that changes it,
   with the type of every distribution (`action 'J' cannot be merged across distributions: goal
-  field 'g' changes type: int32 in [jazzy], int64 in [lyrical]`). A `.srv` that differs between
-  distributions is still rejected.
+  field 'g' changes type: int32 in [jazzy], int64 in [lyrical]`).
 - Messages, services and actions are merged across distributions on one path, and every type
   that cannot be merged is reported in the format above: at the line of the `.msg`, `.srv` or
   `.action` of the distribution that introduces the problem, with the type, its part and, for a
   field that changes type, its type in every distribution. This covers a message field that
   changes type (a bare `IRMergeError` that named no file), shared fields in a different order,
-  a field that skips a distribution (`GeneratorError.modernDistroDivergence`, which the pipeline
-  no longer throws), and a `.srv` that differs between distributions, which is still rejected
-  (`service 'S' cannot be merged across distributions: response differs in lyrical from jazzy`).
-  A `.srv` whose parts parse to the same IDL apart from comments and layout is no longer
-  rejected, and an invalid default or constant in a `.srv` names the file's path, as in a `.msg`
-  or `.action`. A type that is the same in every distribution is decided on the parsed IDL, never
-  on a float comparison, so a `nan` default is the same as itself and `0.0` differs from `-0.0`.
+  and a field that skips a distribution (`GeneratorError.modernDistroDivergence`, which the
+  pipeline no longer throws). A `.srv` whose parts parse to the same IDL apart from comments and
+  layout is no longer rejected and generates as the oldest distribution's `.srv`, and an invalid
+  default or constant in a `.srv` names the file's path, as in a `.msg` or `.action`. A type that
+  is the same in every distribution is decided on the parsed IDL, never on a float comparison, so
+  a `nan` default is the same as itself and `0.0` differs from `-0.0`.
   Services and actions now use the union of the runs' `--types` lists, as messages already did;
   only programmatic callers that pass a different list per run are affected, and a run with
   `nil` adds nothing to the union, as for messages.

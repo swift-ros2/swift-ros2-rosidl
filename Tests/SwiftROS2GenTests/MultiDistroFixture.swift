@@ -95,6 +95,22 @@ struct MultiDistroFixture {
         ]
     }()
 
+    /// `fixture_msgs/srv/Probe`, whose `.srv` differs in every distribution like
+    /// `nav2_msgs/srv/IsPathValid`:
+    /// - request: `int32 target`, plus `string legacy_mode` on Humble only and
+    ///   `float64 tolerance 0.5` from Kilted on;
+    /// - response: `uint8 status`, with the constant `OK` from Kilted on, to which Lyrical adds
+    ///   `BUSY` and the field `bool success` before `status`.
+    static let probing: [String: [String: String]] = [
+        "humble": ["srv/Probe.srv": "int32 target\nstring legacy_mode\n---\nuint8 status\n"],
+        "jazzy": ["srv/Probe.srv": "int32 target\n---\nuint8 status\n"],
+        "kilted": ["srv/Probe.srv": "int32 target\nfloat64 tolerance 0.5\n---\nuint8 OK=0\nuint8 status\n"],
+        "lyrical": [
+            "srv/Probe.srv": "int32 target\nfloat64 tolerance 0.5\n---\nuint8 OK=0\nuint8 BUSY=2\nbool success\n"
+                + "uint8 status\n"
+        ],
+    ]
+
     /// `fixture_msgs/action/Shift` on Jazzy and Lyrical, two of whose parts have no fields in
     /// one of them: the goal has `int32 order` on Jazzy and no fields on Lyrical, the feedback no
     /// fields on Jazzy and `float32 x` on Lyrical. The result is `int32 code` on both.
