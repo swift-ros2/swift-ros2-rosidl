@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
+
+Actions and services whose IDL differs between distributions are merged across them, as
+messages already were, on one merge path with one error format; an action's goal, result and
+feedback have their constants. Other types that are the same in every distribution generate
+as in 1.1.1, and the runtime modules do not change.
 
 ### Added
 
